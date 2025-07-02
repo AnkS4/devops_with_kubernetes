@@ -372,9 +372,12 @@ shell:
 			: ; \
 		else \
 			echo "❌ No shell available - pod may not be running or ready"; \
-			echo "Pod status:"; \
-			kubectl get pod $(POD_LABEL) -n $(NAMESPACE) 2>/dev/null || \
+			if kubectl get pod $(POD_LABEL) -n $(NAMESPACE) >/dev/null 2>&1; then \
+				echo "Pod status:"; \
+				kubectl get pod $(POD_LABEL) -n $(NAMESPACE); \
+			else \
 				echo "❌ Pod '$(POD_LABEL)' not found in namespace '$(NAMESPACE)'"; \
+			fi; \
 		fi; \
 	fi
 
