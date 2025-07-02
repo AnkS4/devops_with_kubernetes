@@ -25,7 +25,7 @@ Here are the recommended steps to get started:
 ```bash
 # Complete setup: build image, create cluster, and deploy
 make rebuild
-# or Enable detailed debug output
+# or with the detailed debug output
 make rebuild DEBUG_ENABLED=true
 
 # View application logs in real-time
