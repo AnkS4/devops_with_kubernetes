@@ -41,21 +41,24 @@ The project includes a comprehensive Makefile that automates the entire developm
 Here are the recommended steps to get started:
 
 ```bash
-
-# 1. Start the application with kubernetes (via k3d) (check dependencies, cleanup, build image, create cluster, and deploy)
-
+# 1. Start the application with kubernetes (via k3d)
+#   - Checks dependencies
+#   - Cleans up existing resources
+#   - Builds Docker image
+#   - Creates k3d cluster
+#   - Deploys application
 make rebuild
 
-# or with the detailed debug output
-
+# or with detailed debug output
 make rebuild DEBUG_ENABLED=true
 
 # 2. View application logs in real-time
-
 make logs
 
-# 3. Clean up all resources (pod, cluster, docker image)
-
+# 3. Clean up all resources
+#   - Deletes pod
+#   - Removes k3d cluster
+#   - Cleans Docker image
 make clean
 
 # View all available commands
