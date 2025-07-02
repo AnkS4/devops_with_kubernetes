@@ -379,6 +379,7 @@ shell:
 	fi
 
 # Print debug information about images, clusters, and pods
+# Print debug information about images, clusters, and pods
 debug:
 	@echo "🔍 Debug Information"
 	@echo "===================="
@@ -392,8 +393,13 @@ debug:
 	@echo "Docker Images:"
 	@docker images | grep "$(IMAGE_NAME)" || echo "❌ No matching images found for '$(IMAGE_NAME)'"
 	@echo ""
-	@echo "K3d Clusters:"
-	@k3d cluster list 2>/dev/null || echo "❌ No clusters found or k3d not available"
+	@echo "k3d Clusters:"
+	@clusters=$$(k3d cluster list 2>/dev/null | tail -n +2); \
+	if [ -z "$$clusters" ]; then \
+		echo "❌ No clusters found"; \
+	else \
+		k3d cluster list 2>/dev/null; \
+	fi
 	@echo ""
 	@echo "All Pods in namespace '$(NAMESPACE)':"
 	@kubectl get pods -n $(NAMESPACE) 2>/dev/null || echo "❌ Cannot connect to cluster"
@@ -402,6 +408,7 @@ debug:
 		echo "All Pods (all namespaces):"; \
 		kubectl get pods --all-namespaces 2>/dev/null || echo "❌ Cannot retrieve pods"; \
 	fi
+
 
 # Remove all resources and rebuild from scratch
 rebuild: clean all
