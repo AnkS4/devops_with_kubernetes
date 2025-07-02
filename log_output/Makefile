@@ -1,42 +1,58 @@
 # ============================================================================
 # PROJECT CONFIGURATION SECTION
 # ============================================================================
+
 # Define core project variables and environment defaults
 
 # Basic project identifiers
 PROJECT_NAME := log-output
-VERSION ?= latest                # Default image version/tag
-ENVIRONMENT ?= development       # Deployment environment (development/production)
+# Default image version/tag
+VERSION ?= latest
+# Deployment environment (development/production)
+ENVIRONMENT ?= development
 
 # Docker image build and tag settings
 IMAGE_NAME := $(PROJECT_NAME)-app
 IMAGE_TAG := $(VERSION)
-DOCKERFILE ?= Dockerfile         # Path to Dockerfile
-DOCKER_BUILD_ARGS ?=             # Extra build args (optional)
+# Path to Dockerfile
+DOCKERFILE ?= Dockerfile
+# Extra build args (optional)
+DOCKER_BUILD_ARGS ?=
 
 # Kubernetes/k3d cluster and pod configuration
 CLUSTER_NAME := $(PROJECT_NAME)-cluster
 POD_LABEL := $(PROJECT_NAME)-pod
-NAMESPACE ?= default             # Kubernetes namespace
-AGENTS ?= 2                      # Number of k3d agent nodes
+# Kubernetes namespace
+NAMESPACE ?= default
+# Number of k3d agent nodes
+AGENTS ?= 2
 
 # Timeouts and log settings
-CLUSTER_TIMEOUT ?= 300s          # Cluster creation timeout
-POD_READY_TIMEOUT ?= 30          # Pod readiness wait timeout (seconds)
-LOG_TAIL_LINES ?= 50             # Number of log lines to show by default
+# Cluster creation timeout
+CLUSTER_TIMEOUT ?= 300s
+# Pod readiness wait timeout (seconds)
+POD_READY_TIMEOUT ?= 30
+# Number of log lines to show by default
+LOG_TAIL_LINES ?= 50
 
 # Network port configuration
-# DNS_SERVER := 1.1.1.1 # Cloudflare DNS (disabled due to k3d issues)
-HOST_PORT ?= 8080                # Host port for service
-CONTAINER_PORT ?= 8000           # Container port for service
+# Cloudflare DNS (disabled due to k3d issues)
+# DNS_SERVER := 1.1.1.1
+# Host port for service
+HOST_PORT ?= 8080
+# Container port for service
+CONTAINER_PORT ?= 8000
 
 # Docker build context and output
 BUILD_CONTEXT ?= .
-BUILD_QUIET ?= true              # Suppress build output if true
+# Suppress build output if true
+BUILD_QUIET ?= true
 
 # Development and debug toggles
-DEV_MODE ?= false                # Enable development workflow
-DEBUG_ENABLED ?= false           # Enable verbose/debug output
+# Enable development workflow
+DEV_MODE ?= false
+# Enable verbose/debug output
+DEBUG_ENABLED ?= false
 
 # ============================================================================
 # DERIVED VARIABLES (DO NOT MODIFY BELOW)
