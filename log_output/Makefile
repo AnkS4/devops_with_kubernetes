@@ -83,6 +83,9 @@ endif
 # MAIN MAKE TARGETS
 # ============================================================================
 
+# Remove all resources and rebuild from scratch
+rebuild: clean check-deps build cluster deploy
+
 # Full workflow: check dependencies, build image, create cluster, deploy pod
 all: check-deps build cluster deploy
 
@@ -393,18 +396,14 @@ debug:
 		kubectl get pods --all-namespaces 2>/dev/null || echo "❌ Cannot retrieve pods"; \
 	fi
 
-
-# Remove all resources and rebuild from scratch
-rebuild: clean all
-
 # Print help and usage examples for the Makefile
 help:
 	@echo "📘 Kubernetes Local Development Makefile"
 	@echo "========================================="
 	@echo ""
 	@echo "🚀 Quick Start:"
-	@echo "  rebuild    Clean and rebuild everything (recommended)"
-	@echo "  all        Full workflow (deps → build → cluster → deploy)"
+	@echo "  rebuild    Clean followed by full workflow (recommended)"
+	@echo "  all        Full workflow (check-deps → build → cluster → deploy)"
 	@echo ""
 	@echo "🔧 Build & Deploy:"
 	@echo "  build      Build Docker image"
@@ -429,7 +428,7 @@ help:
 	@echo "  AGENTS=1               Single agent node"
 	@echo ""
 	@echo "💡 Examples:"
-	@echo "  make rebuild DEBUG_ENABLED=true AGENTS=1  # Fresh start with debug output and single agent"
-	@echo "  make clean DEBUG_ENABLED=true             # Clean up with debug output"
+	@echo "  make rebuild AGENTS=1  		# Fresh start with single agent"
+	@echo "  make clean DEBUG_ENABLED=true  # Clean up with debug output"
 	@echo ""
 	@echo "Usage: make [target] [VARIABLE=value]"
