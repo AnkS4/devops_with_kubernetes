@@ -2,6 +2,24 @@
 
 This is a simple Python application that continuously outputs timestamped log messages with a unique identifier. The application generates a random UUID at startup and then prints it along with an ISO 8601 formatted timestamp every 5 seconds.
 
+## Requirements
+
+### System Requirements
+- Docker (for building container images)
+- k3d (Kubernetes in Docker, for running the application in Kubernetes)
+- kubectl (Kubernetes command-line tool)
+- Python 3.12+ (for running the application directly)
+
+### Python Dependencies
+- Standard Python libraries (no external packages required)
+  - `time` (for sleep functionality)
+  - `uuid` (for generating unique identifiers)
+  - `datetime` (for timestamp handling)
+
+### Optional Requirements
+- Git (for version control and cloning the repository)
+- Make (for using the Makefile commands)
+
 ## What the Application Does
 
 The main application (`app.py`) performs the following operations:
