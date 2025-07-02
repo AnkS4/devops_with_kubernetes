@@ -84,7 +84,7 @@ endif
 # ============================================================================
 
 # Remove all resources and rebuild from scratch
-rebuild: clean check-deps build cluster deploy
+rebuild: check-deps clean build cluster deploy
 
 # Full workflow: check dependencies, build image, create cluster, deploy pod
 all: check-deps build cluster deploy
@@ -402,7 +402,7 @@ help:
 	@echo "========================================="
 	@echo ""
 	@echo "🚀 Quick Start:"
-	@echo "  rebuild    Clean followed by full workflow (recommended)"
+	@echo "  rebuild    Clean followed by full workflow (recommended) (check-deps → clean → build → cluster → deploy)"
 	@echo "  all        Full workflow (check-deps → build → cluster → deploy)"
 	@echo ""
 	@echo "🔧 Build & Deploy:"
