@@ -5,20 +5,15 @@ This is a simple Python application that continuously outputs timestamped log me
 ## Requirements
 
 ### System Requirements
+- Git (for version control and cloning the repository)
 - Docker (for building container images)
 - k3d (Kubernetes in Docker, for running the application in Kubernetes)
 - kubectl (Kubernetes command-line tool)
 - Python 3.12+ (for running the application directly)
+- Make (for using the Makefile commands)
 
 ### Python Dependencies
 - Standard Python libraries (no external packages required)
-  - `time` (for sleep functionality)
-  - `uuid` (for generating unique identifiers)
-  - `datetime` (for timestamp handling)
-
-### Optional Requirements
-- Git (for version control and cloning the repository)
-- Make (for using the Makefile commands)
 
 ## What the Application Does
 
