@@ -4,7 +4,7 @@ This is a simple Python application that continuously outputs timestamped log me
 
 ## What the Application Does
 
-The main application (`app.py`) performs the following operations[1]:
+The main application (`app.py`) performs the following operations:
 - Generates a random UUID string when the application starts
 - Enters an infinite loop that:
   - Gets the current UTC timestamp
@@ -16,9 +16,11 @@ This creates a continuous stream of timestamped log entries, making it useful fo
 
 ## Using the Makefile
 
-The project includes a comprehensive Makefile that automates the entire development workflow using Docker and Kubernetes (via k3d). 
+The project includes a comprehensive Makefile that automates the entire development workflow using Docker and Kubernetes (via k3d).
 
-### **Recommended Steps**
+### Getting Started
+
+Here are the recommended steps to get started:
 
 ```bash
 # Complete setup: build image, create cluster, and deploy
@@ -36,4 +38,10 @@ make clean
 # View all available commands
 make help
 ```
+
+### Additional Notes
+
+- The application is designed to run in a containerized environment
+- All timestamps are in UTC to maintain consistency across different time zones
+- The UUID remains constant throughout the application's lifetime until restart
 
