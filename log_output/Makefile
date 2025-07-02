@@ -45,10 +45,8 @@ HOST_PORT ?= 8080
 # Container port for service
 CONTAINER_PORT ?= 8000
 
-# Docker build context and output
+# Docker build context
 BUILD_CONTEXT ?= .
-# Suppress build output if true
-BUILD_QUIET ?= true
 
 # Development and debug toggles
 # Enable development workflow
@@ -60,13 +58,6 @@ DEBUG_ENABLED ?= false
 # DERIVED VARIABLES (DO NOT MODIFY BELOW)
 # ============================================================================
 # These are computed based on the above configuration
-
-# Set Docker build flags for quiet or verbose output
-ifeq ($(BUILD_QUIET),true)
-    DOCKER_BUILD_FLAGS := --quiet
-else
-    DOCKER_BUILD_FLAGS := 
-endif
 
 # Set debug/verbosity flags for tools based on DEBUG_ENABLED
 ifeq ($(DEBUG_ENABLED),true)
