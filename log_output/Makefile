@@ -122,10 +122,10 @@ check-deps:
 		echo "❌ Docker not found!"; exit 1; \
 	fi
 	@if docker buildx version >/dev/null 2>&1; then \
-		echo "✅ Docker Buildx found"; \
+		echo "✅ Docker buildx found"; \
 	else \
-		echo "❌ Docker Buildx not found! DOCKER_BUILDKIT may not work properly"; \
-		echo "   Install with: sudo apt install docker-buildx-plugin"; \
+		echo "❌ Docker buildx not found! DOCKER_BUILDKIT may not work properly"; \
+		echo "   Install appropriate plugin such as 'sudo pacman -S docker-buildx' for Arch Linux"; \
 		exit 1; \
 	fi
 	@if command -v k3d >/dev/null 2>&1; then \
@@ -378,7 +378,6 @@ shell:
 		fi; \
 	fi
 
-# Print debug information about images, clusters, and pods
 # Print debug information about images, clusters, and pods
 debug:
 	@echo "🔍 Debug Information"
