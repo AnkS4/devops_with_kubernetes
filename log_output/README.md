@@ -9,10 +9,10 @@ This is a simple Python application that continuously outputs timestamped log me
 - Docker (for building container images)
 - k3d (Kubernetes in Docker, for running the application in Kubernetes)
 - kubectl (Kubernetes command-line tool)
-- Python 3.12+ (for running the application directly)
 - Make (for using the Makefile commands)
 
-### Python Dependencies
+### Other Dependencies (Handled by the Makefile via Dockerfile)
+- Python 3.12+ (for running the application directly)
 - Standard Python libraries (no external packages required)
 
 ## What the Application Does
