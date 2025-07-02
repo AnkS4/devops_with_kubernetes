@@ -16,6 +16,7 @@ A simple Python application that continuously outputs timestamped log messages w
 - `python` 3.12+ (for running the application directly)
 
 ## Quick Start
+The project includes a comprehensive Makefile that automates the entire development workflow using Docker and Kubernetes (via k3d).
 
 Here are the recommended steps to get started:
 
