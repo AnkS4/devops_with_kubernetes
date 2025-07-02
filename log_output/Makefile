@@ -49,8 +49,6 @@ CONTAINER_PORT ?= 8000
 BUILD_CONTEXT ?= .
 
 # Development and debug toggles
-# Enable development workflow
-DEV_MODE ?= false
 # Enable verbose/debug output
 DEBUG_ENABLED ?= false
 
@@ -114,7 +112,6 @@ config:
 	@echo "  RESTART_POLICY: $(RESTART_POLICY)"
 	@echo "  POD_READY_TIMEOUT: $(POD_READY_TIMEOUT)s"
 	@echo "  DEBUG_ENABLED: $(DEBUG_ENABLED)"
-	@echo "  DEV_MODE: $(DEV_MODE)"
 
 # Check for required tools and files, and verify Dockerfile dependencies
 check-deps:
