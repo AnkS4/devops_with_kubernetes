@@ -376,7 +376,7 @@ watch:
 	@if kubectl get namespace $(NAMESPACE) >/dev/null 2>&1; then \
 		watch kubectl get pods -n $(NAMESPACE); \
 	else \
-		echo "❌ Namespace '$(NAMESPACE)' not found!"; exit 1; \
+		echo "❌ Namespace '$(NAMESPACE)' not found!"; \
 	fi
 
 # Open an interactive shell in the running pod, fallback to /bin/bash if sh is unavailable
