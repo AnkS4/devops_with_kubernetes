@@ -8,8 +8,6 @@
 PROJECT_NAME := log-output
 # Default image version/tag
 VERSION ?= latest
-# Deployment environment (development/production)
-ENVIRONMENT ?= development
 
 # Docker image build and tag settings
 IMAGE_NAME := $(PROJECT_NAME)-app
@@ -26,6 +24,10 @@ POD_LABEL := $(PROJECT_NAME)-pod
 NAMESPACE ?= default
 # Number of k3d agent nodes
 AGENTS ?= 2
+# Image pull policy
+IMAGE_PULL_POLICY ?= IfNotPresent
+# Pod restart policy
+RESTART_POLICY ?= Never
 
 # Timeouts and log settings
 # Cluster creation timeout
@@ -58,15 +60,6 @@ DEBUG_ENABLED ?= false
 # DERIVED VARIABLES (DO NOT MODIFY BELOW)
 # ============================================================================
 # These are computed based on the above configuration
-
-# Set image pull and restart policies based on environment
-ifeq ($(ENVIRONMENT),production)
-    IMAGE_PULL_POLICY := Always
-    RESTART_POLICY := Always
-else
-    IMAGE_PULL_POLICY := IfNotPresent
-    RESTART_POLICY := Never
-endif
 
 # Set Docker build flags for quiet or verbose output
 ifeq ($(BUILD_QUIET),true)
@@ -111,7 +104,6 @@ config:
 	@echo "Project Settings:"
 	@echo "  PROJECT_NAME: $(PROJECT_NAME)"
 	@echo "  VERSION: $(VERSION)"
-	@echo "  ENVIRONMENT: $(ENVIRONMENT)"
 	@echo ""
 	@echo "Docker Settings:"
 	@echo "  IMAGE_NAME: $(IMAGE_NAME)"
@@ -209,7 +201,6 @@ build:
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo "   Project: $(PROJECT_NAME)"; \
 		echo "   Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
-		echo "   Environment: $(ENVIRONMENT)"; \
 		echo "   Dockerfile: $(DOCKERFILE)"; \
 		echo "   Build context: $(BUILD_CONTEXT)"; \
 		if DOCKER_BUILDKIT=1 docker build $(DOCKER_BUILD_FLAGS) \
@@ -455,14 +446,12 @@ help:
 	@echo "Configuration Variables:"
 	@echo "  PROJECT_NAME       : Base name for resources (default: log-output)"
 	@echo "  VERSION            : Image version/tag (default: latest)"
-	@echo "  ENVIRONMENT        : Deployment environment (default: development)"
 	@echo "  NAMESPACE          : Kubernetes namespace (default: default)"
 	@echo "  AGENTS             : Number of k3d agent nodes (default: 2)"
 	@echo "  DEBUG_ENABLED      : Enable verbose output (default: false)"
 	@echo "  POD_READY_TIMEOUT  : Pod readiness timeout in seconds (default: 30)"
 	@echo ""
 	@echo "Configuration Examples:"
-	@echo "  make ENVIRONMENT=production VERSION=v1.2.3"
 	@echo "  make DEBUG_ENABLED=true"
 	@echo "  make AGENTS=1 POD_READY_TIMEOUT=60"
 	@echo "  make NAMESPACE=testing"
