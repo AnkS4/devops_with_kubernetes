@@ -75,7 +75,7 @@ endif
 # ============================================================================
 # PHONY TARGETS DECLARATION
 # ============================================================================
-.PHONY: clean build cluster deploy all status logs shell rebuild help check-deps dev watch config debug
+.PHONY: clean build cluster deploy all status logs shell rebuild help check-deps watch config debug
 
 .DEFAULT_GOAL := all
 
@@ -282,21 +282,6 @@ deploy:
 		echo "⚠️ Timeout reached. Check: 'make logs' or 'make status'") || \
 		(echo "❌ Pod deployment failed"; exit 1)
 
-# Fast development workflow: build, import, and redeploy pod
-dev: build
-	@echo "🔄 Development deployment..."
-	@echo "📤 Importing updated image..."
-	@k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || \
-		(echo "❌ Image import failed"; exit 1)
-	@echo "🗑️ Removing existing pod..."
-	@kubectl delete pod $(POD_LABEL) -n $(NAMESPACE) --ignore-not-found=true --wait=true $(REDIRECT_OUTPUT)
-	@echo "🚀 Deploying updated pod..."
-	@kubectl run $(POD_LABEL) --image=$(IMAGE_NAME):$(IMAGE_TAG) \
-		--image-pull-policy=IfNotPresent \
-		--restart=Never \
-		--namespace=$(NAMESPACE) $(REDIRECT_OUTPUT)
-	@echo "✅ Development deployment complete"
-
 # Show status of Docker, cluster, and pod (with debug info if enabled)
 status:
 	@echo "📊 System Status"
@@ -420,7 +405,6 @@ help:
 	@echo "🚀 Quick Start:"
 	@echo "  rebuild    Clean and rebuild everything (recommended)"
 	@echo "  all        Full workflow (deps → build → cluster → deploy)"
-	@echo "  dev        Fast development iteration"
 	@echo ""
 	@echo "🔧 Build & Deploy:"
 	@echo "  build      Build Docker image"
