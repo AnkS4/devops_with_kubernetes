@@ -1,0 +1,39 @@
+# Log Output Application
+
+This is a simple Python application that continuously outputs timestamped log messages with a unique identifier. The application generates a random UUID at startup and then prints it along with an ISO 8601 formatted timestamp every 5 seconds.
+
+## What the Application Does
+
+The main application (`app.py`) performs the following operations[1]:
+- Generates a random UUID string when the application starts
+- Enters an infinite loop that:
+  - Gets the current UTC timestamp
+  - Formats it as ISO 8601 with milliseconds (e.g., `2024-01-15T10:30:45.123Z`)
+  - Prints the timestamp followed by the UUID
+  - Waits 5 seconds before repeating
+
+This creates a continuous stream of timestamped log entries, making it useful for testing log aggregation systems, monitoring setups, or demonstrating containerized applications.
+
+## Using the Makefile
+
+The project includes a comprehensive Makefile that automates the entire development workflow using Docker and Kubernetes (via k3d). 
+
+### **Recommended Steps**
+
+```bash
+# Complete setup: build image, create cluster, and deploy
+make rebuild
+
+# Enable detailed debug output
+make rebuild DEBUG_ENABLED=true
+
+# View application logs in real-time
+make logs
+
+# Clean up all resources (pod, cluster, docker image)
+make clean
+
+# View all available commands
+make help
+```
+
