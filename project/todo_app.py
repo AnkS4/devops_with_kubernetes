@@ -1,17 +1,20 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import uvicorn
+import os
 
-app = FastAPI()
+PORT = int(os.getenv("PORT", 8000))
 
-PORT = 8000
-
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print(f"Server started in port {PORT}")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def root():
     return {"message": "Hello World"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=PORT)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
