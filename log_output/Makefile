@@ -176,7 +176,7 @@ clean:
 		else \
 			echo "⚠️ Deployment not found or already deleted"; \
 		fi; \
-		echo "🗑️ Cleaning up generated files..."; \
+		# echo "🗑️ Cleaning up generated files..."; \
 		# rm -f manifests/deployment.yaml 2>/dev/null || true; \
 		echo "🗑️ Deleting cluster '$(CLUSTER_NAME)'..."; \
 		if k3d cluster delete $(CLUSTER_NAME) 2>/dev/null; then \
