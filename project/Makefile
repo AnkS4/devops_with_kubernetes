@@ -20,7 +20,6 @@ DOCKER_BUILD_ARGS ?=
 
 # Kubernetes/k3d cluster and pod configuration
 CLUSTER_NAME := $(PROJECT_NAME)-cluster
-POD_LABEL := $(PROJECT_NAME)-pod
 
 # Kubernetes namespace
 NAMESPACE ?= default
@@ -115,7 +114,6 @@ config:
 	@echo ""
 	@echo "Kubernetes Settings:"
 	@echo "  CLUSTER_NAME: $(CLUSTER_NAME)"
-	@echo "  POD_LABEL: $(POD_LABEL)"
 	@echo "  NAMESPACE: $(NAMESPACE)"
 	@echo "  AGENTS: $(AGENTS)"
 	@echo ""
@@ -360,7 +358,7 @@ status:
 				echo "No events found"; \
 		fi; \
 	elif kubectl cluster-info $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "⚠️ Pod '$(POD_LABEL)' not found in namespace '$(NAMESPACE)'"; \
+		echo "⚠️ Deployment '$(PROJECT_NAME)-deployment' not found in namespace '$(NAMESPACE)'"; \
 	else \
 		echo "❌ Cannot connect to cluster"; \
 	fi
