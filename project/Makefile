@@ -300,26 +300,6 @@ generate-deployment:
 	  > manifests/deployment.yaml
 	@echo "✅ deployment.yaml generated with current configuration"
 
-
-# Function to check if a port is available
-# Returns 0 if port is available, 1 if in use
-check_port_available = \
-	test -z "$$(lsof -i :$(1) -t 2>/dev/null)" && \
-	test -z "$$(ss -tuln | grep 'LISTEN.*:$(1)[^0-9]')"
-
-# Function to find an available port starting from the given port
-find_available_port = $(shell \
-	port=$(1); \
-	while [ $$port -lt 65535 ]; do \
-		if ! lsof -i :$$port >/dev/null 2>&1 && ! ss -tuln | grep -q 'LISTEN.*:'$$port'[^0-9]'; then \
-			echo $$port; \
-			break; \
-		fi; \
-		port=$$((port + 1)); \
-	done; \
-	echo $$port \
-)
-
 # Deploy the application using deployment.yaml and verify readiness
 deploy: generate-deployment
 	@echo "🚀 Deploying application..."
@@ -334,42 +314,16 @@ deploy: generate-deployment
 		kubectl cluster-info $(REDIRECT_OUTPUT) || (echo "❌ Cluster connection failed"; exit 1); \
 	fi
 	@echo "📝 Applying deployment configuration..."
-	@kubectl apply -f manifests/deployment.yaml -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) && \
-		echo "✅ Deployment applied successfully!" && \
+	@kubectl apply -f manifests/deployment.yaml -f manifests/service.yaml -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) && \
+		echo "✅ Deployment and service applied successfully!" && \
 		echo "⏳ Waiting for deployment readiness ($(POD_READY_TIMEOUT)s timeout)..." && \
 		(timeout $(POD_READY_TIMEOUT) kubectl wait --for=condition=Available deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) && \
 		echo "🎉 Deployment is ready!" || \
 		echo "⚠️ Timeout reached. Check: 'make logs' or 'make status'") || \
 		(echo "❌ Deployment failed"; exit 1)
-	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
-	if [ -z "$$POD_NAME" ]; then \
-		echo "❌ Failed to get pod name"; \
-		exit 1; \
-	fi; \
-	PORT_TO_USE=$(CONTAINER_PORT); \
-	if ! $(call check_port_available,$$PORT_TO_USE); then \
-		echo "⚠️ Port $$PORT_TO_USE is in use, searching for an available port..."; \
-		NEW_PORT=$$(($(CONTAINER_PORT) + 1)); \
-		while [ $$NEW_PORT -lt 65535 ] && ! $(call check_port_available,$$NEW_PORT); do \
-			NEW_PORT=$$((NEW_PORT + 1)); \
-		done; \
-		if [ $$NEW_PORT -ge 65535 ]; then \
-			echo "❌ Could not find an available port"; \
-			exit 1; \
-		fi; \
-		PORT_TO_USE=$$NEW_PORT; \
-		echo "🔀 Using alternative port: $$PORT_TO_USE"; \
-	else \
-		echo "🔗 Using default port: $$PORT_TO_USE"; \
-	fi; \
-	echo "🔗 Starting port forwarding on localhost:$$PORT_TO_USE to pod $$POD_NAME:$(CONTAINER_PORT)"; \
-	echo "   (Access your application at http://localhost:$$PORT_TO_USE)"; \
-	if [ "$(DEBUG_ENABLED)" = "true" ]; then \
-		echo "   Debug: kubectl port-forward $$POD_NAME $$PORT_TO_USE:$(CONTAINER_PORT) -n $(NAMESPACE)"; \
-	fi; \
-	nohup kubectl port-forward $$POD_NAME $$PORT_TO_USE:$(CONTAINER_PORT) -n $(NAMESPACE) > port-forward.log 2>&1 & \
-	PORT_FORWARD_PID=$$!; \
-	echo "   Port-forward running in background (PID: $$PORT_FORWARD_PID)"
+	@NODE_IP=$$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'); \
+		echo "✅ Deployment complete using NodePort service. Access your application at:"; \
+		echo "   http://$${NODE_IP}:30080";
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
 status:
