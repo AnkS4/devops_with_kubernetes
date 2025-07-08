@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: project-deployment
+  name: todo-app-deployment
   namespace: default
   labels:
-    app: project
+    app: todo-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: project
+      app: todo-app
   template:
     metadata:
       labels:
-        app: project
+        app: todo-app
     spec:
       containers:
-      - name: project-container
-        image: project-app:latest
+      - name: todo-app-container
+        image: todo-app:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
