@@ -1,13 +1,36 @@
-import time
-import uuid
+import time, uuid, threading
 from datetime import datetime, UTC
+from pathlib import Path
+from fastapi import FastAPI
 
-# Generate a random UUID at startup
-random_string = str(uuid.uuid4())
+app = FastAPI()
 
-while True:
-    now = datetime.now(UTC)
-    # Format with ISO 8601 and milliseconds
-    timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.') + f"{now.microsecond // 1000:03d}Z"
-    print(f"{timestamp}: {random_string}")
-    time.sleep(5)
+STATUS_FILE = Path("/tmp/status.txt")
+
+def status_updater():
+    while True:
+        now = datetime.now(UTC)
+        timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.') + f"{now.microsecond // 1000:03d}Z"
+        random_string = str(uuid.uuid4())
+        status = f"{timestamp}: {random_string}"
+        print(status)
+        with STATUS_FILE.open("w") as f:
+            f.write(status)
+        time.sleep(5)
+
+@app.on_event("startup")
+def startup():
+    thread = threading.Thread(target=status_updater, daemon=True)
+    thread.start()
+
+@app.get("/")
+def root():
+    return {"message": "Hello World"}
+
+@app.get("/status")
+def status():
+    if STATUS_FILE.exists():
+        with STATUS_FILE.open("r") as f:
+            return {"current_status": f.read()}
+    else:
+        return {"current_status": "Status file not found"}
