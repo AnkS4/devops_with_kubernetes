@@ -4,8 +4,7 @@ metadata:
   name: log-output-ingress
 spec:
   rules:
-    - host: log-output.local
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
