@@ -2,6 +2,10 @@ import time, uuid, threading
 from datetime import datetime, UTC
 from pathlib import Path
 from fastapi import FastAPI
+import uvicorn
+import os
+
+PORT = int(os.getenv("PORT", 8000))
 
 app = FastAPI()
 
@@ -34,3 +38,6 @@ def status():
             return {"current_status": f.read()}
     else:
         return {"current_status": "Status file not found"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
