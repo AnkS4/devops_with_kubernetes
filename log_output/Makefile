@@ -324,20 +324,19 @@ deploy:
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
 	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
 	(echo "⚠️ Timeout reached. Check: 'make logs' or 'make status'"; exit 1)
-	@echo "⏳ Fetching NodeIP..."
-	@NODE_IP=$$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'); \
-	[ -n "$$NODE_IP" ] || (echo "❌ Unable to determine NodeIP"; exit 1); \
-	echo "⏳ Fetching service NodePort (retries up to 10 seconds)..."; \
+	@echo "🌐 Checking Ingress endpoint..."; \
 	for attempt in {1..5}; do \
-		NODE_PORT=$$(kubectl get svc $(PROJECT_NAME)-svc -n $(NAMESPACE) \
-		-o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null); \
-		[ -n "$$NODE_PORT" ] && break; \
-		echo "⏳ Waiting for $(PROJECT_NAME)-svc NodePort..."; sleep 2; \
+		INGRESS_HOST=$$(kubectl get ingress -n $(NAMESPACE) -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null); \
+		if [ -n "$$INGRESS_HOST" ]; then break; fi; \
+		echo "Waiting for Ingress host..."; sleep 2; \
 	done; \
-	if [ -n "$$NODE_PORT" ]; then \
-		echo "✅ Deployment complete. Access /status at: http://$$NODE_IP:$$NODE_PORT/status"; \
+	if [ "$$INGRESS_HOST" = "*" ]; then \
+		echo "⚠️ Ingress host is set to '*'. Please set a real host in your ingress configuration. For example: 'host: myapp.example.com'"; \
+		echo "✅ Deployment complete, but Ingress endpoint is not accessible. Check 'kubectl get ingress -n $(NAMESPACE)' for more information"; \
+		exit 0; \
 	else \
-		echo "❌ Unable to determine NodePort"; exit 1; \
+		echo "✅ Deployment complete. Access /status at: http://$$INGRESS_HOST/status"; \
+		echo "ℹ️  If http://$$INGRESS_HOST/status does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
 	fi
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
