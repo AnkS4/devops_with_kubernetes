@@ -314,14 +314,27 @@ deploy: generate-deployment
 	else \
 		kubectl cluster-info $(REDIRECT_OUTPUT) || (echo "❌ Cluster connection failed"; exit 1); \
 	fi
-	@echo "📝 Applying deployment configuration..."
-	@kubectl apply -f manifests/deployment.yaml -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) && \
-		echo "✅ Deployment applied successfully!" && \
-		echo "⏳ Waiting for deployment readiness ($(POD_READY_TIMEOUT)s timeout)..." && \
-		(timeout $(POD_READY_TIMEOUT) kubectl wait --for=condition=Available deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) && \
-		echo "🎉 Deployment is ready!" || \
-		echo "⚠️ Timeout reached. Check: 'make logs' or 'make status'") || \
-		(echo "❌ Deployment failed"; exit 1)
+	@echo "📝 Applying manifests individually..."
+	@for f in $(shell ls manifests/*.yaml | sort); do \
+		echo "Applying: $$f"; \
+		kubectl apply -f $$f -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
+	done && \
+	echo "✅ Applied all manifests successfully!" && \
+	echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..." && \
+	kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s && \
+	echo "🎉 Deployment is ready!" && \
+	NODE_IP=$(shell kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}') && \
+	for i in 1 2 3 4 5; do \
+        NODE_PORT=$$(kubectl get svc log-output-svc -n $(NAMESPACE) -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null); \
+        if [ -n "$$NODE_PORT" ]; then break; fi; \
+        echo "Waiting for log-output-svc NodePort..."; sleep 2; \
+    done; \
+    if [ -n "$$NODE_PORT" ]; then \
+        echo "Access the status endpoint at: http://$$NODE_IP:$$NODE_PORT/status"; \
+    else \
+        echo "⚠️ Could not determine NodePort for log-output-svc. Check 'kubectl get svc -n $(NAMESPACE)'"; \
+    fi || \
+	( echo "⚠️ Timeout reached. Check: 'make logs' or 'make status'"; exit 1 )
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
 status:
