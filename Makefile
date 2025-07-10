@@ -96,12 +96,12 @@ IMAGE_NAME          ?= $(PROJECT_NAME)-app
 VERSION             ?= latest
 IMAGE_TAG           ?= $(VERSION)
 DOCKERFILE          ?= $(PROJECT_NAME)/Dockerfile
+DOCKERFILE_DIR      := $(dir $(DOCKERFILE))
 DOCKER_BUILD_ARGS   ?=
 NAMESPACE           ?= default
 CLUSTER_NAME        ?= $(PROJECT_NAME)-cluster
 AGENTS              ?= 2
 IMAGE_PULL_POLICY   ?= IfNotPresent
-RESTART_POLICY      ?= Never
 CLUSTER_TIMEOUT     ?= 300s
 POD_READY_TIMEOUT   ?= 30
 LOG_TAIL_LINES      ?= 50
@@ -116,7 +116,7 @@ DEBUG_ENABLED       ?= false
 # These are computed based on the above configuration
 
 # Automatically detect build context based on Dockerfile location
-BUILD_CONTEXT ?= $(dir $(DOCKERFILE))
+BUILD_CONTEXT ?= $(DOCKERFILE_DIR)
 
 # Set debug/verbosity flags for tools based on DEBUG_ENABLED
 ifeq ($(DEBUG_ENABLED),true)
@@ -242,10 +242,10 @@ check-deps: validate-project
 	fi
 	@echo "🔍 Checking Dockerfile dependencies..."
 	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) 2>/dev/null | awk '{print $$2}' | grep -v '^http' | sort -u); do \
-		if [ -f "$$file" ] || [ -d "$$file" ]; then \
-			echo "✅ Found: $$file"; \
+		if [ -f "$(DOCKERFILE_DIR)$$file" ] || [ -d "$(DOCKERFILE_DIR)$$file" ]; then \
+			echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
 		else \
-			echo "❌ Missing: $$file"; \
+			echo "❌ Missing: $(DOCKERFILE_DIR)$$file"; \
 			exit 1; \
 		fi; \
 	done
@@ -384,7 +384,7 @@ generate-deployment: validate-project
 	  '        env:' \
 	  '        - name: PORT' \
 	  '          value: "$(CONTAINER_PORT)"' \
-	  '      restartPolicy: Always' \
+	  '      restartPolicy: $(RESTART_POLICY)' \
 	  > $(MANIFEST_DIR)/deployment.yaml
 	@echo "✅ deployment.yaml generated at $(MANIFEST_DIR)/deployment.yaml"
 
