@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: ping-pong-container
-        image: ping-pong:latest
+        image: ping-pong-app:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8002
