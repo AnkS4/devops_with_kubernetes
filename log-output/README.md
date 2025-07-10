@@ -11,6 +11,7 @@ A simple Python application that continuously outputs timestamped log messages w
 - `kubectl` (Kubernetes command-line tool)
 - `docker-buildx` plugin (for building multi-arch images)
 - `make` (for using the Makefile commands)
+- `kubectl-ingress-nginx` (for ingress controller)
 
 ### Other Dependencies (Handled by the Makefile via Dockerfile)
 - `python` 3.12+ (for running the application directly)
