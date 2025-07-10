@@ -353,43 +353,8 @@ cluster: validate-project
 		fi; \
 	fi
 
-# Generate deployment.yaml from template with current configuration
-generate-deployment: validate-project
-	@echo "📝 Generating deployment.yaml for project '$(PROJECT_NAME)'..."
-	@mkdir -p $(MANIFEST_DIR)
-	@printf '%s\n' \
-	  'apiVersion: apps/v1' \
-	  'kind: Deployment' \
-	  'metadata:' \
-	  '  name: $(PROJECT_NAME)-deployment' \
-	  '  namespace: $(NAMESPACE)' \
-	  '  labels:' \
-	  '    app: $(PROJECT_NAME)' \
-	  'spec:' \
-	  '  replicas: 1' \
-	  '  selector:' \
-	  '    matchLabels:' \
-	  '      app: $(PROJECT_NAME)' \
-	  '  template:' \
-	  '    metadata:' \
-	  '      labels:' \
-	  '        app: $(PROJECT_NAME)' \
-	  '    spec:' \
-	  '      containers:' \
-	  '      - name: $(PROJECT_NAME)-container' \
-	  '        image: $(IMAGE_NAME):$(IMAGE_TAG)' \
-	  '        imagePullPolicy: $(IMAGE_PULL_POLICY)' \
-	  '        ports:' \
-	  '        - containerPort: $(CONTAINER_PORT)' \
-	  '        env:' \
-	  '        - name: PORT' \
-	  '          value: "$(CONTAINER_PORT)"' \
-	  '      restartPolicy: $(RESTART_POLICY)' \
-	  > $(MANIFEST_DIR)/deployment.yaml
-	@echo "✅ deployment.yaml generated at $(MANIFEST_DIR)/deployment.yaml"
-
 # Apply manifests to the cluster
-deploy: validate-project cluster-exists generate-deployment
+deploy: validate-project cluster-exists
 	@echo "🚀 Deploying application '$(PROJECT_NAME)'..."
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo " Deployment: $(PROJECT_NAME)-deployment"; \
