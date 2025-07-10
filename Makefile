@@ -13,7 +13,7 @@
 # All variables can be overridden via command line or environment.
 # ============================================================================
 PROJECTS := $(shell find . -maxdepth 1 -type d -name '[!.]*' -not -name 'venv' -not -name '__pycache__' | sed 's|^\./||' | sort)
-TARGET ?= rebuild
+TARGET ?= all
 
 .PHONY: default help all-projects list-projects validate-project
 .DEFAULT_GOAL := default
@@ -52,7 +52,6 @@ help:
 	@echo ""
 	@echo "🔗 Interact:"
 	@echo "  shell      Open pod shell"
-	@echo "  port-forward  Forward local port to pod"
 	@echo "  restart    Restart deployment"
 	@echo "  config     Show configuration"
 	@echo "  validate   Validate project and dependencies"
@@ -105,7 +104,12 @@ IMAGE_PULL_POLICY   ?= IfNotPresent
 CLUSTER_TIMEOUT     ?= 300s
 POD_READY_TIMEOUT   ?= 30
 LOG_TAIL_LINES      ?= 50
-HOST_PORT           ?= 8080
+# Dynamically assign HOST_PORT based on project index for parallel multi-project support
+HOST_PORT_BASE      ?= 8080
+# Get index (1-based) of PROJECT_NAME in PROJECTS list
+PROJECT_INDEX       := $(shell echo $(PROJECTS) | tr ' ' '\n' | grep -n '^$(PROJECT_NAME)$$' | cut -d: -f1)
+# Assign unique HOST_PORT per project (8080, 8081, ...)
+HOST_PORT           := $(shell expr $(HOST_PORT_BASE) + $(PROJECT_INDEX) - 1)
 CONTAINER_PORT      ?= 8000
 RESTART_POLICY      ?= Never
 DEBUG_ENABLED       ?= false
@@ -136,7 +140,7 @@ endif
 # ============================================================================
 # PHONY TARGETS DECLARATION
 # ============================================================================
-.PHONY: clean build cluster deploy all status logs shell rebuild help check-deps watch config debug generate-deployment print-projects default all-projects validate-project health port-forward restart deployment-exists
+.PHONY: clean build cluster deploy all status logs shell rebuild help check-deps watch config debug generate-deployment print-projects default all-projects validate-project health restart deployment-exists
 .DEFAULT_GOAL := default
 
 # ============================================================================
@@ -172,8 +176,8 @@ cluster-exists: validate-project
 # Remove all resources and rebuild from scratch
 rebuild: validate-project clean build cluster deploy
 
-# Full workflow: validate, build image, create cluster, deploy pod
-all: validate-project build cluster deploy
+# Full workflow: validate, clean, build image, create cluster, deploy
+all: validate-project clean build cluster deploy
 
 # Validate project and dependencies
 validate: validate-project check-deps
@@ -381,8 +385,20 @@ deploy: validate-project cluster-exists
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
 	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
 	(echo "⚠️ Timeout reached. Check: 'make logs PROJECT_NAME=$(PROJECT_NAME)' or 'make status PROJECT_NAME=$(PROJECT_NAME)'"; exit 1)
-	@echo "✅ Deployment complete for project '$(PROJECT_NAME)'!"
-	@echo "ℹ️  Use 'make port-forward PROJECT_NAME=$(PROJECT_NAME)' to access the application locally"
+	@echo "🌐 Checking Ingress endpoint..."; \
+	for attempt in {1..5}; do \
+		INGRESS_HOST=$$(kubectl get ingress -n $(NAMESPACE) -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null); \
+		if [ -n "$$INGRESS_HOST" ]; then break; fi; \
+		echo "Waiting for Ingress host..."; sleep 2; \
+	done; \
+	if [ "$$INGRESS_HOST" = "*" ]; then \
+		echo "⚠️ Ingress host is set to '*'. Please set a real host in your ingress configuration. For example: 'host: myapp.example.com'"; \
+		echo "✅ Deployment complete, but Ingress endpoint is not accessible. Check 'kubectl get ingress -n $(NAMESPACE)' for more information"; \
+		exit 0; \
+	else \
+		echo "✅ Deployment complete. Access /status at: http://$$INGRESS_HOST/status"; \
+		echo "ℹ️  If http://$$INGRESS_HOST/status does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
+	fi
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
 status: validate-project
@@ -488,13 +504,6 @@ health: validate-project deployment-exists
 	else \
 		echo "❌ No pods found for deployment '$(PROJECT_NAME)-deployment'"; \
 	fi
-
-# Port forward to access the application locally
-port-forward: validate-project deployment-exists
-	@echo "🔗 Port forwarding $(HOST_PORT):$(CONTAINER_PORT) for project '$(PROJECT_NAME)'"
-	@echo "  Access your app at: http://localhost:$(HOST_PORT)"
-	@echo "  Press Ctrl+C to stop forwarding..."
-	@kubectl port-forward deployment/$(PROJECT_NAME)-deployment $(HOST_PORT):$(CONTAINER_PORT) -n $(NAMESPACE)
 
 # Restart the deployment
 restart: validate-project deployment-exists
