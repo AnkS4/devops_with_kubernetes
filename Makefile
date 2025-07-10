@@ -104,13 +104,6 @@ IMAGE_PULL_POLICY   ?= IfNotPresent
 CLUSTER_TIMEOUT     ?= 300s
 POD_READY_TIMEOUT   ?= 30
 LOG_TAIL_LINES      ?= 50
-# Dynamically assign HOST_PORT based on project index for parallel multi-project support
-HOST_PORT_BASE      ?= 8080
-# Get index (1-based) of PROJECT_NAME in PROJECTS list
-PROJECT_INDEX       := $(shell echo $(PROJECTS) | tr ' ' '\n' | grep -n '^$(PROJECT_NAME)$$' | cut -d: -f1)
-# Assign unique HOST_PORT per project (8080, 8081, ...)
-HOST_PORT           := $(shell expr $(HOST_PORT_BASE) + $(PROJECT_INDEX) - 1)
-CONTAINER_PORT      ?= 8000
 RESTART_POLICY      ?= Never
 DEBUG_ENABLED       ?= false
 
@@ -206,8 +199,6 @@ config: validate-project
 	@echo "  IMAGE_PULL_POLICY: $(IMAGE_PULL_POLICY)"
 	@echo "  RESTART_POLICY: $(RESTART_POLICY)"
 	@echo "  POD_READY_TIMEOUT: $(POD_READY_TIMEOUT)s"
-	@echo "  HOST_PORT: $(HOST_PORT)"
-	@echo "  CONTAINER_PORT: $(CONTAINER_PORT)"
 	@echo "  DEBUG_ENABLED: $(DEBUG_ENABLED)"
 
 # Print all projects
@@ -393,8 +384,16 @@ deploy: validate-project cluster-exists
 		echo "✅ Deployment complete, but Ingress endpoint is not accessible. Check 'kubectl get ingress -n $(NAMESPACE)' for more information"; \
 		exit 0; \
 	else \
-		echo "✅ Deployment complete. Access application at: http://$$INGRESS_HOST:$$INGRESS_PORT"; \
-		echo "ℹ️  If http://$$INGRESS_HOST:$$INGRESS_PORT does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
+		if [ "$(PROJECT_NAME)" = "ping-pong" ]; then \
+			echo "✅ Deployment complete. Access /pingpong at: http://$$INGRESS_HOST:$$INGRESS_PORT/pingpong"; \
+			echo "ℹ️  If http://$$INGRESS_HOST:$$INGRESS_PORT/pingpong does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
+		elif [ "$(PROJECT_NAME)" = "log-output" ]; then \
+			echo "✅ Deployment complete. Access /status at: http://$$INGRESS_HOST/status"; \
+			echo "ℹ️  If http://$$INGRESS_HOST/status does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
+		else \
+			echo "✅ Deployment complete. Access application at: http://$$INGRESS_HOST"; \
+			echo "ℹ️  If http://$$INGRESS_HOST/ does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
+		fi; \
 	fi
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
