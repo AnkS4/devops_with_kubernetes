@@ -265,8 +265,6 @@ clean: validate-project
 		else \
 			echo "⚠️ Deployment not found or already deleted"; \
 		fi; \
-		echo "🗑️ Cleaning up generated files..."; \
-		rm -f $(MANIFEST_DIR)/deployment.yaml 2>/dev/null || true; \
 		echo "🗑️ Deleting cluster '$(CLUSTER_NAME)'..."; \
 		if k3d cluster delete $(CLUSTER_NAME) 2>/dev/null; then \
 			echo "✅ Cluster deleted"; \
@@ -281,7 +279,6 @@ clean: validate-project
 		fi; \
 	else \
 		kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true >/dev/null 2>&1 || true; \
-		rm -f $(MANIFEST_DIR)/deployment.yaml >/dev/null 2>&1 || true; \
 		k3d cluster delete $(CLUSTER_NAME) >/dev/null 2>&1 || true; \
 		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1 || true; \
 	fi
@@ -396,8 +393,8 @@ deploy: validate-project cluster-exists
 		echo "✅ Deployment complete, but Ingress endpoint is not accessible. Check 'kubectl get ingress -n $(NAMESPACE)' for more information"; \
 		exit 0; \
 	else \
-		echo "✅ Deployment complete. Access /status at: http://$$INGRESS_HOST/status"; \
-		echo "ℹ️  If http://$$INGRESS_HOST/status does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
+		echo "✅ Deployment complete. Access application at: http://$$INGRESS_HOST:$$INGRESS_PORT"; \
+		echo "ℹ️  If http://$$INGRESS_HOST:$$INGRESS_PORT does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
 	fi
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
