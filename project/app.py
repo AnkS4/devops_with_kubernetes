@@ -3,7 +3,7 @@ from fastapi import FastAPI
 import uvicorn
 import os
 
-PORT = int(os.getenv("PORT", 8000))
+PORT = int(os.getenv("PORT", 8001))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

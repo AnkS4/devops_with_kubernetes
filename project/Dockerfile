@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # Ensure Python output is unbuffered (important for Docker logs)
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
+ENV PORT=8001
 
 WORKDIR /app
 
@@ -12,4 +12,4 @@ COPY app.py .
 
 EXPOSE $PORT
 
-CMD ["python", "todo_app.py", "$PORT"]
+CMD ["python", "app.py", "$PORT"]
