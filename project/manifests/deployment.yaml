@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: project-deployment
-  namespace: default
   labels:
     app: project
 spec:
@@ -20,8 +19,8 @@ spec:
         image: project-app:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 8000
+        - containerPort: 8001
         env:
         - name: PORT
-          value: "8000"
+          value: "8001"
       restartPolicy: Always
