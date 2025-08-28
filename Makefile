@@ -6,13 +6,19 @@
 # ============================================================================
 # UNIVERSAL MAKEFILE FOR ALL PROJECTS (GENERIC/PARAMETERIZED)
 # ============================================================================
-# Place this Makefile at the root of devops_with_kubernetes.
 # Usage for any project (override variables as needed):
 #   make build PROJECT_NAME=ping-pong MANIFEST_DIR=ping_pong/manifests DOCKERFILE=ping_pong/Dockerfile
 #   make deploy PROJECT_NAME=todo-app MANIFEST_DIR=project/manifests DOCKERFILE=project/Dockerfile
 # All variables can be overridden via command line or environment.
 # ============================================================================
-PROJECTS := $(shell find . -maxdepth 1 -type d -name '[!.]*' -not -name 'venv' -not -name '__pycache__' | sed 's|^\./||' | sort)
+
+# Find all projects with Dockerfile and manifests directory
+PROJECTS := $(shell \
+  for d in */ ; do \
+    [ -f "$${d}Dockerfile" ] && [ -d "$${d}manifests" ] && echo $${d%/}; \
+  done | sort)
+
+# Default target to run
 TARGET ?= all
 
 .PHONY: default help all-projects list-projects validate-project
@@ -92,13 +98,13 @@ help:
 PROJECT_NAME        ?= project
 MANIFEST_DIR        ?= $(PROJECT_NAME)/manifests
 IMAGE_NAME          ?= $(PROJECT_NAME)-app
-VERSION             ?= latest
-IMAGE_TAG           ?= $(VERSION)
+IMAGE_TAG           ?= latest
 DOCKERFILE          ?= $(PROJECT_NAME)/Dockerfile
 DOCKERFILE_DIR      := $(dir $(DOCKERFILE))
 DOCKER_BUILD_ARGS   ?=
-NAMESPACE           ?= default
 CLUSTER_NAME        ?= $(PROJECT_NAME)-cluster
+INGRESS_NAME        ?= $(PROJECT_NAME)-ingress
+NAMESPACE           ?= $(CLUSTER_NAME)
 AGENTS              ?= 2
 IMAGE_PULL_POLICY   ?= IfNotPresent
 CLUSTER_TIMEOUT     ?= 300s
@@ -106,6 +112,42 @@ POD_READY_TIMEOUT   ?= 30
 LOG_TAIL_LINES      ?= 50
 RESTART_POLICY      ?= Never
 DEBUG_ENABLED       ?= false
+K3D_RESOLV_FILE     ?= k3s-resolv.conf
+K3D_FIX_DNS         ?= 0
+
+# Function to find an available port starting from a base port
+define find_available_port
+$(shell \
+  port=$(1); \
+  while [ $$port -lt 65535 ]; do \
+    AVAILABLE=1; \
+    if command -v ss >/dev/null 2>&1; then \
+      if command -v timeout >/dev/null 2>&1; then \
+        timeout 0.5s ss -Hln "sport = :$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
+      else \
+        ss -Hln "sport = :$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
+      fi; \
+    elif command -v lsof >/dev/null 2>&1; then \
+      lsof -PiTCP:$$port -sTCP:LISTEN -n >/dev/null 2>&1 && AVAILABLE=0 || true; \
+    else \
+      if command -v timeout >/dev/null 2>&1; then \
+        timeout 0.5s bash -lc ": < /dev/tcp/127.0.0.1/$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
+      else \
+        bash -lc ": < /dev/tcp/127.0.0.1/$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
+      fi; \
+    fi; \
+    if [ $$AVAILABLE -eq 1 ]; then echo $$port; exit 0; fi; \
+    port=$$((port + 1)); \
+  done \
+)
+endef
+
+# Dynamic port assignments
+# TRAEFIK_HTTP_PORT  ?= $(call find_available_port,8080)
+# TRAEFIK_HTTPS_PORT ?= $(call find_available_port,8443)
+
+TRAEFIK_HTTP_PORT  ?= 8080
+TRAEFIK_HTTPS_PORT ?= 8443
 
 # ============================================================================
 # DERIVED VARIABLES (DO NOT MODIFY BELOW)
@@ -167,10 +209,10 @@ cluster-exists: validate-project
 # ============================================================================
 
 # Remove all resources and rebuild from scratch
-rebuild: validate-project clean build cluster deploy
+rebuild: validate-project clean build cluster deploy ingress
 
-# Full workflow: validate, clean, build image, create cluster, deploy
-all: validate-project clean build cluster deploy
+# Full workflow: validate, clean, build image, create cluster, deploy and ingress
+all: validate-project clean build cluster deploy ingress
 
 # Validate project and dependencies
 validate: validate-project check-deps
@@ -181,7 +223,7 @@ config: validate-project
 	@echo "========================"
 	@echo "Project Settings:"
 	@echo "  PROJECT_NAME: $(PROJECT_NAME)"
-	@echo "  VERSION: $(VERSION)"
+	@echo "  IMAGE_TAG: $(IMAGE_TAG)"
 	@echo ""
 	@echo "Docker Settings:"
 	@echo "  IMAGE_NAME: $(IMAGE_NAME)"
@@ -313,40 +355,65 @@ cluster: validate-project
 		k3d cluster start $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
 	else \
 		echo "🔧 Creating cluster '$(CLUSTER_NAME)' with $(AGENTS) agent(s)..."; \
-		if K3D_FIX_DNS=0 k3d cluster create $(CLUSTER_NAME) -a $(AGENTS) --wait \
-			--k3s-arg "--kube-proxy-arg=conntrack-max-per-core=0@server:*" \
+		if K3D_FIX_DNS=$() k3d cluster create $(CLUSTER_NAME) -a $(AGENTS) --wait \
+			-p "$(TRAEFIK_HTTP_PORT):80@loadbalancer" \
+			-p "$(TRAEFIK_HTTPS_PORT):443@loadbalancer" \
 			--timeout $(CLUSTER_TIMEOUT) $(REDIRECT_OUTPUT); then \
 			echo "✅ Cluster created successfully"; \
 		else \
 			echo "❌ Cluster creation failed"; exit 1; \
 		fi; \
 	fi
-	@echo "📥 Importing Docker images to cluster..."
+
 	@if [ "$(DEBUG_ENABLED)" = "false" ]; then \
-		echo "📥 Preloading infrastructure images..."; \
-		docker pull rancher/mirrored-pause:3.6 $(REDIRECT_OUTPUT) || true; \
-		k3d image import rancher/mirrored-pause:3.6 -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		echo "📥 Preloading critical cluster images..."; \
+		for img in \
+			rancher/mirrored-pause:3.6 \
+			rancher/mirrored-coredns-coredns:1.12.0 \
+			rancher/local-path-provisioner:v0.0.30 \
+			rancher/mirrored-metrics-server:v0.7.2 \
+			rancher/klipper-helm:v0.9.3-build20241008 \
+			rancher/mirrored-library-traefik:2.11.18 \
+			rancher/klipper-lb:v0.4.9; do \
+			docker pull $$img $(REDIRECT_OUTPUT) || true; \
+			k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		done; \
 		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-			echo "✅ Setup complete"; \
+		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1; then \
+			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+				echo "✅ Image import complete"; \
+			else \
+				echo "❌ Image import failed"; exit 1; \
+			fi; \
 		else \
-			echo "❌ Image import failed"; exit 1; \
+			echo "⚠️  Skipping import: local image '$(IMAGE_NAME):$(IMAGE_TAG)' not found. Run 'make build' first."; \
 		fi; \
 	else \
-		echo "📥 Preloading critical infrastructure images..."; \
-		docker pull rancher/mirrored-pause:3.6 2>/dev/null || true; \
-		k3d image import rancher/mirrored-pause:3.6 -c $(CLUSTER_NAME) 2>/dev/null || true; \
-		echo "✅ Infrastructure images imported"; \
+		echo "📥 Preloading critical cluster images (verbose)..."; \
+		for img in \
+			rancher/mirrored-pause:3.6 \
+			rancher/mirrored-coredns-coredns:1.12.0 \
+			rancher/local-path-provisioner:v0.0.30 \
+			rancher/mirrored-metrics-server:v0.7.2 \
+			rancher/klipper-helm:v0.9.3-build20241008 \
+			rancher/mirrored-library-traefik:2.11.18 \
+			rancher/klipper-lb:v0.4.9; do \
+			echo "Pulling $$img"; docker pull $$img 2>/dev/null || true; \
+			echo "Importing $$img"; k3d image import $$img -c $(CLUSTER_NAME) 2>/dev/null || true; \
+		done; \
 		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME); then \
-			echo "✅ Image import complete"; \
+		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1; then \
+			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME); then \
+				echo "✅ Image import complete"; \
+			else \
+				echo "❌ Image import failed"; exit 1; \
+			fi; \
 		else \
-			echo "❌ Image import failed"; exit 1; \
+			echo "⚠️  Skipping import: local image '$(IMAGE_NAME):$(IMAGE_TAG)' not found. Run 'make build' first."; \
 		fi; \
 	fi
 
-# Apply manifests to the cluster
-deploy: validate-project cluster-exists
+deploy: validate-project
 	@echo "🚀 Deploying application '$(PROJECT_NAME)'..."
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo " Deployment: $(PROJECT_NAME)-deployment"; \
@@ -358,43 +425,51 @@ deploy: validate-project cluster-exists
 	else \
 		kubectl cluster-info $(REDIRECT_OUTPUT) || (echo "❌ Cluster connection failed"; exit 1); \
 	fi
-	@echo "📝 Applying manifests from $(MANIFEST_DIR)..."
-	@if [ ! -d "$(MANIFEST_DIR)" ] || [ -z "$$(ls -A $(MANIFEST_DIR)/*.yaml 2>/dev/null)" ]; then \
-		echo "❌ No manifest files found in $(MANIFEST_DIR)"; \
-		exit 1; \
+	@echo "🗂️  Ensuring namespace '$(NAMESPACE)' exists..."
+	@if ! kubectl get ns $(NAMESPACE) >/dev/null 2>&1; then \
+		echo "Namespace '$(NAMESPACE)' does not exist. Creating..."; \
+		kubectl create ns $(NAMESPACE); \
+	else \
+		echo "Namespace '$(NAMESPACE)' already exists."; \
 	fi
-	@set -e; \
-	for f in $$(ls $(MANIFEST_DIR)/*.yaml 2>/dev/null | sort); do \
-		echo "Applying: $$f"; \
-		kubectl apply -f $$f -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || \
-		(echo "❌ Failed to apply manifest: $$f"; exit 1); \
-	done; \
-	echo "✅ Applied all manifests successfully!"
+	@echo "📝 Applying manifests from $(MANIFEST_DIR)..."
+	@if [ ! -d "$(MANIFEST_DIR)" ]; then echo "❌ No manifest directory: $(MANIFEST_DIR)"; exit 1; fi
+	@if ! ls $(MANIFEST_DIR)/*.yaml >/dev/null 2>&1; then echo "❌ No *.yaml files in $(MANIFEST_DIR)"; exit 1; fi
+	@kubectl apply -f $(MANIFEST_DIR) -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || (echo "❌ Failed to apply manifests"; exit 1)
+	@echo "✅ Applied all manifests successfully!"
+	
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
 	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
 	(echo "⚠️ Timeout reached. Check: 'make logs PROJECT_NAME=$(PROJECT_NAME)' or 'make status PROJECT_NAME=$(PROJECT_NAME)'"; exit 1)
+
+ingress: deploy
 	@echo "🌐 Checking Ingress endpoint..."; \
-	for attempt in {1..5}; do \
-		INGRESS_HOST=$$(kubectl get ingress -n $(NAMESPACE) -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null); \
-		if [ -n "$$INGRESS_HOST" ]; then break; fi; \
-		echo "Waiting for Ingress host..."; sleep 2; \
+	HOST=""; \
+	for attempt in {1..10}; do \
+	  if kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) >/dev/null 2>&1; then \
+	    HOST=$$(kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null); \
+	  else \
+	    HOST=$$(kubectl get ingress -n $(NAMESPACE) -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null); \
+	  fi; \
+	  [ -n "$$HOST" ] && break; \
+	  echo "Waiting for Ingress host..."; sleep 2; \
 	done; \
-	if [ "$$INGRESS_HOST" = "*" ]; then \
-		echo "⚠️ Ingress host is set to '*'. Please set a real host in your ingress configuration. For example: 'host: myapp.example.com'"; \
-		echo "✅ Deployment complete, but Ingress endpoint is not accessible. Check 'kubectl get ingress -n $(NAMESPACE)' for more information"; \
-		exit 0; \
-	else \
-		if [ "$(PROJECT_NAME)" = "ping-pong" ]; then \
-			echo "✅ Deployment complete. Access /pingpong at: http://$$INGRESS_HOST:$$INGRESS_PORT/pingpong"; \
-			echo "ℹ️  If http://$$INGRESS_HOST:$$INGRESS_PORT/pingpong does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
-		elif [ "$(PROJECT_NAME)" = "log-output" ]; then \
-			echo "✅ Deployment complete. Access /status at: http://$$INGRESS_HOST/status"; \
-			echo "ℹ️  If http://$$INGRESS_HOST/status does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
-		else \
-			echo "✅ Deployment complete. Access application at: http://$$INGRESS_HOST"; \
-			echo "ℹ️  If http://$$INGRESS_HOST/ does not resolve, add '127.0.0.1 $$INGRESS_HOST' to your /etc/hosts file."; \
-		fi; \
-	fi
+	if [ "$$HOST" = "" ]; then \
+		echo "❌ Ingress host not found"; exit 1; \
+	fi; \
+	if [ "$$HOST" = "*" ]; then \
+	  echo "⚠️ Ingress host is '*'. Set a real host (e.g., 'host: myapp.example.com')."; \
+	  echo "✅ Deployment complete, but endpoint not accessible. See: 'kubectl get ingress -n $(NAMESPACE)'"; \
+	  exit 0; \
+	fi; \
+	PATH_SUFFIX=""; \
+	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
+	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
+	echo "✅ Deployment complete."; \
+	echo "Access: http://$$HOST:$(TRAEFIK_HTTP_PORT)$$PATH_SUFFIX"; \
+	echo "ℹ️  If it does not resolve, add '127.0.0.1 $$HOST' to /etc/hosts."
+	echo "OR test with: curl -H \"Host: $$HOST\" http://127.0.0.1:$(TRAEFIK_HTTP_PORT)$$PATH_SUFFIX"
+	
 
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
 status: validate-project
@@ -418,7 +493,7 @@ status: validate-project
 	@echo ""
 	@echo "📊 Deployment Status:"
 	@if kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "✅ Deployment '$(PROJECT_NAME)-deployment' found in namespace '$(NAMESPACE)'"; \
+		echo "✅ Deployment '$(PROJECT_NAME)-deployment' found in namespace '$(NAMESPACE)'"; \oar
 		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE); \
 		echo ""; \
 		echo "📊 Pod Status:"; \
