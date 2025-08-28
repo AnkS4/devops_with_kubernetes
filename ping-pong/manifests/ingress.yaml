@@ -3,7 +3,7 @@ kind: Ingress
 metadata:
   name: ping-pong-ingress
 spec:
-  ingressClassName: nginx-example
+  ingressClassName: traefik
   rules:
     - host: ping-pong.local
       http:
@@ -13,12 +13,5 @@ spec:
             backend:
               service:
                 name: ping-pong-svc
-                port:
-                  number: 1234
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: log-output-svc
                 port:
                   number: 1234
