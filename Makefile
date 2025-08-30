@@ -21,7 +21,7 @@ PROJECTS := $(shell \
 # Default target to run
 TARGET ?= all
 
-.PHONY: default help all-projects list-projects validate-project
+.PHONY: default help all-projects list-projects validate-project clean build cluster deploy all status logs shell rebuild
 .DEFAULT_GOAL := default
 
 default: help
@@ -122,19 +122,13 @@ $(shell \
   while [ $$port -lt 65535 ]; do \
     AVAILABLE=1; \
     if command -v ss >/dev/null 2>&1; then \
-      if command -v timeout >/dev/null 2>&1; then \
-        timeout 0.5s ss -Hln "sport = :$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
-      else \
-        ss -Hln "sport = :$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
-      fi; \
+      ss -Hln "sport = :$$port" 2>/dev/null | grep -q . && AVAILABLE=0 || AVAILABLE=1; \
+    elif command -v netstat >/dev/null 2>&1; then \
+      netstat -an 2>/dev/null | grep -E "LISTEN|LISTENING" | grep -E "[:.]$$port[[:space:]]" >/dev/null && AVAILABLE=0 || AVAILABLE=1; \
     elif command -v lsof >/dev/null 2>&1; then \
-      lsof -PiTCP:$$port -sTCP:LISTEN -n >/dev/null 2>&1 && AVAILABLE=0 || true; \
+      lsof -PiTCP:$$port -sTCP:LISTEN -n 2>/dev/null | grep -q . && AVAILABLE=0 || AVAILABLE=1; \
     else \
-      if command -v timeout >/dev/null 2>&1; then \
-        timeout 0.5s bash -lc ": < /dev/tcp/127.0.0.1/$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
-      else \
-        bash -lc ": < /dev/tcp/127.0.0.1/$$port" >/dev/null 2>&1 && AVAILABLE=0 || true; \
-      fi; \
+      (echo > /dev/tcp/127.0.0.1/$$port) >/dev/null 2>&1 && AVAILABLE=0 || AVAILABLE=1; \
     fi; \
     if [ $$AVAILABLE -eq 1 ]; then echo $$port; exit 0; fi; \
     port=$$((port + 1)); \
@@ -143,11 +137,11 @@ $(shell \
 endef
 
 # Dynamic port assignments
-# TRAEFIK_HTTP_PORT  ?= $(call find_available_port,8080)
-# TRAEFIK_HTTPS_PORT ?= $(call find_available_port,8443)
+TRAEFIK_HTTP_PORT  ?= $(call find_available_port,8080)
+TRAEFIK_HTTPS_PORT ?= $(call find_available_port,8443)
 
-TRAEFIK_HTTP_PORT  ?= 8080
-TRAEFIK_HTTPS_PORT ?= 8443
+# TRAEFIK_HTTP_PORT  ?= 8080
+# TRAEFIK_HTTPS_PORT ?= 8443
 
 # ============================================================================
 # DERIVED VARIABLES (DO NOT MODIFY BELOW)
@@ -441,36 +435,32 @@ deploy: validate-project
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
 	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
 	(echo "⚠️ Timeout reached. Check: 'make logs PROJECT_NAME=$(PROJECT_NAME)' or 'make status PROJECT_NAME=$(PROJECT_NAME)'"; exit 1)
+	@echo "✅ Deployment complete!"
 
-ingress: deploy
-	@echo "🌐 Checking Ingress endpoint..."; \
-	HOST=""; \
-	for attempt in {1..10}; do \
-	  if kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) >/dev/null 2>&1; then \
-	    HOST=$$(kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null); \
-	  else \
-	    HOST=$$(kubectl get ingress -n $(NAMESPACE) -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null); \
-	  fi; \
-	  [ -n "$$HOST" ] && break; \
-	  echo "Waiting for Ingress host..."; sleep 2; \
-	done; \
+# Check Ingress endpoint
+ingress:
+	@echo "Checking Ingress endpoint..."; \
+	kubectl wait --timeout=60s -n $(NAMESPACE) --for=jsonpath={.spec.rules[0].host} ing/$(INGRESS_NAME) || false; \
+	HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
+	EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}') 2>/dev/null || true; \
+	[ -n "$$EXTERNAL_IP" ] || EXTERNAL_IP=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
+	EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}"); \
+	PATH_SUFFIX=""; \
+	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
+	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
+	echo "🌐 Access via URL:"; \
+	echo "http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"; \
+	echo "ℹ️  If it does not resolve, add '$$EXTERNAL_IP $$HOST' to /etc/hosts and access via 'http://$$HOST:$$EXTERNAL_PORT$$PATH_SUFFIX'"; \
+	echo "OR with: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"; \
 	if [ "$$HOST" = "" ]; then \
 		echo "❌ Ingress host not found"; exit 1; \
 	fi; \
 	if [ "$$HOST" = "*" ]; then \
-	  echo "⚠️ Ingress host is '*'. Set a real host (e.g., 'host: myapp.example.com')."; \
-	  echo "✅ Deployment complete, but endpoint not accessible. See: 'kubectl get ingress -n $(NAMESPACE)'"; \
-	  exit 0; \
-	fi; \
-	PATH_SUFFIX=""; \
-	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
-	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
-	echo "✅ Deployment complete."; \
-	echo "Access: http://$$HOST:$(TRAEFIK_HTTP_PORT)$$PATH_SUFFIX"; \
-	echo "ℹ️  If it does not resolve, add '127.0.0.1 $$HOST' to /etc/hosts."
-	echo "OR test with: curl -H \"Host: $$HOST\" http://127.0.0.1:$(TRAEFIK_HTTP_PORT)$$PATH_SUFFIX"
+		echo "⚠️ Ingress host is '*'. Set a real host (e.g., 'host: myapp.example.com')."; \
+		echo "Endpoint not accessible. See: 'kubectl get ingress -n $(NAMESPACE)'"; \
+		exit 0; \
+	fi;
 	
-
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
 status: validate-project
 	@echo "📊 System Status for Project '$(PROJECT_NAME)'"
