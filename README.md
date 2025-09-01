@@ -12,3 +12,5 @@
 - [1.6.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.6/project)
 - [1.7.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.7/log_output)
 - [1.8.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.8/project)
+- [1.9.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.9/ping_pong)
+
