@@ -440,11 +440,13 @@ deploy: validate-project
 # Check Ingress endpoint
 ingress:
 	@echo "Checking Ingress endpoint..."; \
-	kubectl wait --timeout=60s -n $(NAMESPACE) --for=jsonpath={.spec.rules[0].host} ing/$(INGRESS_NAME) || false; \
-	HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}'); \
-	EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}') 2>/dev/null || true; \
-	[ -n "$$EXTERNAL_IP" ] || EXTERNAL_IP=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
-	EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}"); \
+	for i in {1..10}; do \
+		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true); \
+		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true); \
+		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || true); \
+		if [ -n "$$HOST" ] && [ -n "$$EXTERNAL_IP" ]; then break; fi; \
+		echo "Waiting for external IP and host to be assigned... (attempt $$i/10)"; sleep 5; \
+	done; \
 	PATH_SUFFIX=""; \
 	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
