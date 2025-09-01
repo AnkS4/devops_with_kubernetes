@@ -448,10 +448,9 @@ ingress:
 	PATH_SUFFIX=""; \
 	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
-	echo "🌐 Access via URL:"; \
-	echo "http://$$HOST$$PATH_SUFFIX"; \
-	echo "ℹ️  If it does not resolve, add '$$EXTERNAL_IP $$HOST' to /etc/hosts and retry"; \
-	echo "OR with: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"; \
+	echo "🌐 Access via URL: "; \
+	echo "http://$$HOST$$PATH_SUFFIX by adding '$$EXTERNAL_IP $$HOST' to /etc/hosts"; \
+	echo "OR by: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"; \
 	if [ "$$HOST" = "" ]; then \
 		echo "❌ Ingress host not found"; exit 1; \
 	fi; \
