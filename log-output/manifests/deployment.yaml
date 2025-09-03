@@ -15,12 +15,25 @@ spec:
         app: log-output
     spec:
       containers:
-      - name: log-output-container
-        image: log-output-app:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 8000
-        env:
-        - name: PORT
-          value: "8000"
+        - name: log-output-generator
+          image: log-output-generator:latest
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: shared-volume
+              mountPath: /app/shared
+        - name: log-output-status
+          image: log-output-status:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "8000"
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: shared-volume
+              mountPath: /app/shared
+              readOnly: true
+      volumes:
+        - name: shared-volume
+          emptyDir: {}
       restartPolicy: Always
