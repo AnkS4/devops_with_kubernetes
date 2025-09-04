@@ -16,13 +16,13 @@ spec:
     spec:
       containers:
         - name: log-output-generator
-          image: log-output-generator:latest
+          image: log-output-app-generator:latest
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: shared-volume
               mountPath: /app/shared
         - name: log-output-status
-          image: log-output-status:latest
+          image: log-output-app-status:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT
