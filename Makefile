@@ -77,15 +77,15 @@ help:
 	@echo "💡 Examples:"
 	@echo " ---Two methods to run make---"
 	@echo " Method 1: Choosing a specific project to run make"
-	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=1                # Build and deploy ping-pong project"
-	@echo "   make clean PROJECT_NAME=project                             # Clean up a specific project"
-	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=1 DEBUG_ENABLED=true  # Rebuild with debug output and single agent"
+	@echo "   make rebuild PROJECT_NAME=ping-pong                # Build and deploy ping-pong project"
+	@echo "   make clean PROJECT_NAME=project                    # Clean up a specific project"
+	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=2 DEBUG_ENABLED=true  # Rebuild with debug output and two agents"
 	@echo "   make rebuild                                               # Rebuild with default agent(s)"
 	@echo ""
 	@echo " Method 2: Choosing all projects to run make"
-	@echo "   make all-projects TARGET=rebuild AGENTS=1                   # Fresh start with single agent for all projects"
+	@echo "   make all-projects TARGET=rebuild AGENTS=2                   # Fresh start with two agents for all projects"
 	@echo "   make all-projects TARGET=clean                              # Clean up all projects"
-	@echo "   make all-projects TARGET=rebuild AGENTS=1 DEBUG_ENABLED=true # Rebuild all projects with debug output and single agent"
+	@echo "   make all-projects TARGET=rebuild AGENTS=2 DEBUG_ENABLED=true # Rebuild all projects with debug output and two agents"
 	@echo "   make all-projects                                          # Rebuild all projects with default agent(s)"
 	@echo ""
 	@echo "🤔 Troubleshooting Tips:"
@@ -105,7 +105,7 @@ DOCKER_BUILD_ARGS   ?=
 CLUSTER_NAME        ?= $(PROJECT_NAME)-cluster
 INGRESS_NAME        ?= $(PROJECT_NAME)-ingress
 NAMESPACE           ?= $(CLUSTER_NAME)
-AGENTS              ?= 2
+AGENTS              ?= 1
 IMAGE_PULL_POLICY   ?= IfNotPresent
 CLUSTER_TIMEOUT     ?= 300s
 POD_READY_TIMEOUT   ?= 30
