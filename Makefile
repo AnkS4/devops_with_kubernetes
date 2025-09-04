@@ -21,7 +21,7 @@ PROJECTS := $(shell \
 # Default target to run
 TARGET ?= all
 
-.PHONY: default help all-projects list-projects validate-project clean build cluster deploy all status logs shell rebuild
+.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy all status logs shell rebuild
 .DEFAULT_GOAL := default
 
 default: help
@@ -167,12 +167,6 @@ else
 endif
 
 # ============================================================================
-# PHONY TARGETS DECLARATION
-# ============================================================================
-.PHONY: clean build cluster deploy all status logs shell rebuild help check-deps watch config debug generate-deployment print-projects default all-projects validate-project health restart deployment-exists
-.DEFAULT_GOAL := default
-
-# ============================================================================
 # VALIDATION TARGETS
 # ============================================================================
 
@@ -186,14 +180,14 @@ validate-project:
 
 # Check if deployment exists
 deployment-exists: validate-project
-	@if ! kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) >/dev/null 2>&1; then \
+	@if ! kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT); then \
 		echo "❌ Deployment '$(PROJECT_NAME)-deployment' not found in namespace '$(NAMESPACE)'"; \
 		exit 1; \
 	fi
 
 # Check if cluster exists and is running
 cluster-exists: validate-project
-	@if ! k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
+	@if ! k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
 		echo "❌ Cluster '$(CLUSTER_NAME)' not found"; \
 		exit 1; \
 	fi
@@ -203,10 +197,10 @@ cluster-exists: validate-project
 # ============================================================================
 
 # Remove all resources and rebuild from scratch
-rebuild: validate-project clean build cluster deploy ingress
+rebuild: validate-project check-deps clean build cluster-create preload-critical-images preload-app-images deploy ingress
 
 # Full workflow: validate, clean, build image, create cluster, deploy and ingress
-all: validate-project clean build cluster deploy ingress
+all: validate-project check-deps clean build cluster-create preload-critical-images preload-app-images deploy ingress
 
 # Validate project and dependencies
 validate: validate-project check-deps
@@ -244,24 +238,24 @@ print-projects:
 # Check for required tools and files, and verify Dockerfile dependencies
 check-deps: validate-project
 	@echo "🔍 Checking dependencies for project '$(PROJECT_NAME)'..."
-	@if command -v docker >/dev/null 2>&1; then \
+	@if command -v docker $(REDIRECT_OUTPUT) 2>&1; then \
 		echo "✅ Docker found"; \
 	else \
 		echo "❌ Docker not found!"; exit 1; \
 	fi
-	@if docker buildx version >/dev/null 2>&1; then \
+	@if docker buildx version $(REDIRECT_OUTPUT) 2>&1; then \
 		echo "✅ Docker buildx found"; \
 	else \
 		echo "❌ Docker buildx not found! DOCKER_BUILDKIT may not work properly"; \
 		echo "  Install appropriate plugin such as 'sudo pacman -S docker-buildx' for Arch Linux"; \
 		exit 1; \
 	fi
-	@if command -v k3d >/dev/null 2>&1; then \
+	@if command -v k3d $(REDIRECT_OUTPUT) 2>&1; then \
 		echo "✅ k3d found"; \
 	else \
 		echo "❌ k3d not found!"; exit 1; \
 	fi
-	@if command -v kubectl >/dev/null 2>&1; then \
+	@if command -v kubectl $(REDIRECT_OUTPUT) 2>&1; then \
 		echo "✅ kubectl found"; \
 	else \
 		echo "❌ kubectl not found!"; exit 1; \
@@ -272,7 +266,7 @@ check-deps: validate-project
 		echo "❌ Dockerfile not found at '$(DOCKERFILE)'!"; exit 1; \
 	fi
 	@echo "🔍 Checking Dockerfile dependencies..."
-	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) 2>/dev/null | awk '{print $$2}' | grep -v '^http' | sort -u); do \
+	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) $(REDIRECT_OUTPUT) | awk '{print $$2}' | grep -v '^http' | sort -u); do \
 		if [ -f "$(DOCKERFILE_DIR)$$file" ] || [ -d "$(DOCKERFILE_DIR)$$file" ]; then \
 			echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
 		else \
@@ -287,53 +281,67 @@ clean: validate-project
 	@echo "🧹 Cleaning resources for project '$(PROJECT_NAME)'..."
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo "🗑️ Deleting deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'..."; \
-		if kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true 2>/dev/null; then \
+		if kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true $(REDIRECT_OUTPUT); then \
 			echo "✅ Deployment deleted"; \
 		else \
 			echo "⚠️ Deployment not found or already deleted"; \
 		fi; \
 		echo "🗑️ Deleting cluster '$(CLUSTER_NAME)'..."; \
-		if k3d cluster delete $(CLUSTER_NAME) 2>/dev/null; then \
+		if k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
 			echo "✅ Cluster deleted"; \
 		else \
 			echo "⚠️ Cluster not found or already deleted"; \
 		fi; \
 		echo "🗑️ Removing Docker image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if docker rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null; then \
+		if docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
 			echo "✅ Image deleted"; \
 		else \
 			echo "⚠️ Image not found or already deleted"; \
 		fi; \
 	else \
-		kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true >/dev/null 2>&1 || true; \
-		k3d cluster delete $(CLUSTER_NAME) >/dev/null 2>&1 || true; \
-		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1 || true; \
+		kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true $(REDIRECT_OUTPUT) || true; \
+		k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT) || true; \
 	fi
 	@echo "✅ Cleanup complete for project '$(PROJECT_NAME)'!"
 
-# Build the Docker image for the application
+# Build the Docker images for the application
 build: validate-project
-	@echo "📦 Building Docker image for project '$(PROJECT_NAME)'..."
-	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
-		echo "  Project: $(PROJECT_NAME)"; \
-		echo "  Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
-		echo "  Dockerfile: $(DOCKERFILE)"; \
-		echo "  Build context: $(BUILD_CONTEXT)"; \
-		if DOCKER_BUILDKIT=1 docker build $(DOCKER_BUILD_FLAGS) \
-			-t $(IMAGE_NAME):$(IMAGE_TAG) \
-			$(DOCKER_BUILD_ARGS) \
-			-f $(DOCKERFILE) \
-			$(BUILD_CONTEXT); then \
-			echo "✅ Image built successfully"; \
-		else \
-			echo "❌ Image build failed"; exit 1; \
+	@echo "📦 Building application Docker image(s)..."
+	@if [ "$(PROJECT_NAME)" = "log-output" ]; then \
+		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
+		IMAGE_NAME2="$(IMAGE_NAME)-status:$(IMAGE_TAG)"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "  Project: $(PROJECT_NAME)"; \
+			echo "  Generator Image: $${IMAGE_NAME1}"; \
+			echo "  Status Image: $${IMAGE_NAME2}"; \
+			echo "  Dockerfile: $(DOCKERFILE)"; \
+			echo "  Build context: $(BUILD_CONTEXT)"; \
 		fi; \
+		for image in "$$IMAGE_NAME1" "$$IMAGE_NAME2"; do \
+			if [ "$$image" = "$$IMAGE_NAME1" ]; then \
+				TARGET="generator"; \
+			else \
+				TARGET="status"; \
+			fi; \
+			if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+				echo "🔨 Building $$TARGET image..."; \
+			fi; \
+			if DOCKER_BUILDKIT=1 docker build -t "$$image" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
+				echo "✅ $$image built successfully"; \
+			else \
+				echo "❌ $$image build failed"; exit 1; \
+			fi; \
+		done; \
 	else \
-		if DOCKER_BUILDKIT=1 docker build $(DOCKER_BUILD_FLAGS) \
-			-t $(IMAGE_NAME):$(IMAGE_TAG) \
-			$(DOCKER_BUILD_ARGS) \
-			-f $(DOCKERFILE) \
-			$(BUILD_CONTEXT) >/dev/null 2>&1; then \
+		echo "📦 Building Docker image for project '$(PROJECT_NAME)'..."; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "  Project: $(PROJECT_NAME)"; \
+			echo "  Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
+			echo "  Dockerfile: $(DOCKERFILE)"; \
+			echo "  Build context: $(BUILD_CONTEXT)"; \
+		fi; \
+		if DOCKER_BUILDKIT=1 docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
 			echo "✅ Image built successfully"; \
 		else \
 			echo "❌ Image build failed"; exit 1; \
@@ -341,15 +349,19 @@ build: validate-project
 	fi
 
 # Create or start the k3d cluster and import required images
-cluster: validate-project
+cluster-create: validate-project
 	@echo "🔧 Setting up cluster '$(CLUSTER_NAME)'..."
-	@if k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
+	@if k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
 		echo "✅ Cluster '$(CLUSTER_NAME)' exists"; \
-		echo "🔧 Starting cluster if stopped..."; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "🔧 Starting cluster if stopped..."; \
+		fi; \
 		k3d cluster start $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
 	else \
-		echo "🔧 Creating cluster '$(CLUSTER_NAME)' with $(AGENTS) agent(s)..."; \
-		if K3D_FIX_DNS=$() k3d cluster create $(CLUSTER_NAME) -a $(AGENTS) --wait \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "🔧 Creating cluster '$(CLUSTER_NAME)' with $(AGENTS) agent(s)..."; \
+		fi; \
+		if K3D_FIX_DNS=$(K3D_FIX_DNS) k3d cluster create $(CLUSTER_NAME) -a $(AGENTS) --wait \
 			-p "$(TRAEFIK_HTTP_PORT):80@loadbalancer" \
 			-p "$(TRAEFIK_HTTPS_PORT):443@loadbalancer" \
 			--timeout $(CLUSTER_TIMEOUT) $(REDIRECT_OUTPUT); then \
@@ -359,49 +371,59 @@ cluster: validate-project
 		fi; \
 	fi
 
-	@if [ "$(DEBUG_ENABLED)" = "false" ]; then \
-		echo "📥 Preloading critical cluster images..."; \
-		for img in \
-			rancher/mirrored-pause:3.6 \
-			rancher/mirrored-coredns-coredns:1.12.0 \
-			rancher/local-path-provisioner:v0.0.30 \
-			rancher/mirrored-metrics-server:v0.7.2 \
-			rancher/klipper-helm:v0.9.3-build20241008 \
-			rancher/mirrored-library-traefik:2.11.18 \
-			rancher/klipper-lb:v0.4.9; do \
-			docker pull $$img $(REDIRECT_OUTPUT) || true; \
-			k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
-		done; \
-		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1; then \
-			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-				echo "✅ Image import complete"; \
-			else \
-				echo "❌ Image import failed"; exit 1; \
-			fi; \
-		else \
-			echo "⚠️  Skipping import: local image '$(IMAGE_NAME):$(IMAGE_TAG)' not found. Run 'make build' first."; \
+# Preload critical cluster images
+preload-critical-images: cluster-create
+	@echo "📥 Preloading critical cluster images..."; \
+	for img in \
+		rancher/mirrored-pause:3.6 \
+		rancher/mirrored-coredns-coredns:1.12.0 \
+		rancher/local-path-provisioner:v0.0.30 \
+		rancher/mirrored-metrics-server:v0.7.2 \
+		rancher/klipper-helm:v0.9.3-build20241008 \
+		rancher/mirrored-library-traefik:2.11.18 \
+		rancher/klipper-lb:v0.4.9; do \
+		docker pull $$img $(REDIRECT_OUTPUT) || true; \
+		k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "✅ Successfully imported $$img"; \
 		fi; \
-	else \
-		echo "📥 Preloading critical cluster images (verbose)..."; \
-		for img in \
-			rancher/mirrored-pause:3.6 \
-			rancher/mirrored-coredns-coredns:1.12.0 \
-			rancher/local-path-provisioner:v0.0.30 \
-			rancher/mirrored-metrics-server:v0.7.2 \
-			rancher/klipper-helm:v0.9.3-build20241008 \
-			rancher/mirrored-library-traefik:2.11.18 \
-			rancher/klipper-lb:v0.4.9; do \
-			echo "Pulling $$img"; docker pull $$img 2>/dev/null || true; \
-			echo "Importing $$img"; k3d image import $$img -c $(CLUSTER_NAME) 2>/dev/null || true; \
-		done; \
-		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1; then \
-			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME); then \
-				echo "✅ Image import complete"; \
+	done; \
+	echo "✅ Successfully imported all critical cluster images"; \
+
+# Preload application images
+preload-app-images: validate-project
+	@echo "📥 Preloading application images..."; \
+	if [ "$(PROJECT_NAME)" = "log-output" ]; then \
+		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
+		IMAGE_NAME2="$(IMAGE_NAME)-status:$(IMAGE_TAG)"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "📤 Importing application images '$$IMAGE_NAME1' and '$$IMAGE_NAME2'..."; \
+		fi; \
+		for img in "$$IMAGE_NAME1" "$$IMAGE_NAME2"; do \
+			if docker image inspect $$img $(REDIRECT_OUTPUT); then \
+				if k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+					if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+						echo "✅ Successfully imported $$img"; \
+					fi; \
+				else \
+					echo "❌ Failed to import $$img"; exit 1; \
+				fi; \
 			else \
-				echo "❌ Image import failed"; exit 1; \
+				echo "⚠️ Skipping import: local image '$$img' not found. Run 'make build' first."; \
 			fi; \
+		done; \
+		echo "✅ Successfully imported all application images"; \
+	else \
+		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
+		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
+			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+				if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+					echo "✅ Successfully imported $(IMAGE_NAME):$(IMAGE_TAG)"; \
+				fi; \
+			else \
+				echo "❌ Failed to import $(IMAGE_NAME):$(IMAGE_TAG)"; exit 1; \
+			fi; \
+			echo "✅ Successfully imported all application images"; \
 		else \
 			echo "⚠️  Skipping import: local image '$(IMAGE_NAME):$(IMAGE_TAG)' not found. Run 'make build' first."; \
 		fi; \
@@ -412,26 +434,32 @@ deploy: validate-project
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo " Deployment: $(PROJECT_NAME)-deployment"; \
 		echo " Namespace: $(NAMESPACE)"; \
-		echo " Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
+		if [ "$(PROJECT_NAME)" = "log-output" ]; then \
+			echo " Images: log-output-generator:latest, log-output-status:latest"; \
+		else \
+			echo " Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
+		fi; \
 		echo " Image Pull Policy: $(IMAGE_PULL_POLICY)"; \
 		echo "🔍 Verifying cluster connection..."; \
 		kubectl cluster-info $(KUBECTL_VERBOSITY) || (echo "❌ Cluster connection failed"; exit 1); \
 	else \
 		kubectl cluster-info $(REDIRECT_OUTPUT) || (echo "❌ Cluster connection failed"; exit 1); \
 	fi
-	@echo "🗂️  Ensuring namespace '$(NAMESPACE)' exists..."
-	@if ! kubectl get ns $(NAMESPACE) >/dev/null 2>&1; then \
-		echo "Namespace '$(NAMESPACE)' does not exist. Creating..."; \
+	@echo "🗂️ Checking for namespace '$(NAMESPACE)'..."
+	@if ! kubectl get ns $(NAMESPACE) $(REDIRECT_OUTPUT); then \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "Namespace '$(NAMESPACE)' does not exist. Creating..."; \
+		fi; \
 		kubectl create ns $(NAMESPACE); \
+		echo "✅ Namespace '$(NAMESPACE)' created successfully"; \
 	else \
-		echo "Namespace '$(NAMESPACE)' already exists."; \
+		echo "✅ Namespace '$(NAMESPACE)' already exists."; \
 	fi
 	@echo "📝 Applying manifests from $(MANIFEST_DIR)..."
 	@if [ ! -d "$(MANIFEST_DIR)" ]; then echo "❌ No manifest directory: $(MANIFEST_DIR)"; exit 1; fi
-	@if ! ls $(MANIFEST_DIR)/*.yaml >/dev/null 2>&1; then echo "❌ No *.yaml files in $(MANIFEST_DIR)"; exit 1; fi
+	@if ! ls $(MANIFEST_DIR)/*.yaml $(REDIRECT_OUTPUT); then echo "❌ No *.yaml files in $(MANIFEST_DIR)"; exit 1; fi
 	@kubectl apply -f $(MANIFEST_DIR) -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || (echo "❌ Failed to apply manifests"; exit 1)
 	@echo "✅ Applied all manifests successfully!"
-	
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
 	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
 	(echo "⚠️ Timeout reached. Check: 'make logs PROJECT_NAME=$(PROJECT_NAME)' or 'make status PROJECT_NAME=$(PROJECT_NAME)'"; exit 1)
@@ -441,9 +469,9 @@ deploy: validate-project
 ingress:
 	@echo "Checking Ingress endpoint..."; \
 	for i in {1..10}; do \
-		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true); \
-		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true); \
-		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || true); \
+		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' $(REDIRECT_OUTPUT) || true); \
+		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' $(REDIRECT_OUTPUT) || true); \
+		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" $(REDIRECT_OUTPUT) || true); \
 		if [ -n "$$HOST" ] && [ -n "$$EXTERNAL_IP" ]; then break; fi; \
 		echo "Waiting for external IP and host to be assigned... (attempt $$i/10)"; sleep 5; \
 	done; \
@@ -468,12 +496,12 @@ status: validate-project
 	@echo "============================================="
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo "🐳 Docker:"; \
-		docker --version 2>/dev/null || echo "❌ Docker not available"; \
+		docker --version $(REDIRECT_OUTPUT) || echo "❌ Docker not available"; \
 		echo ""; \
 	fi
 	@echo "📊 Cluster Status:"
-	@if k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
-		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
+	@if k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
+		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
 		echo "✅ Cluster '$(CLUSTER_NAME)' - Status: $$STATUS"; \
 		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 			k3d cluster list | grep -E "(NAME|$(CLUSTER_NAME))"; \
@@ -484,7 +512,7 @@ status: validate-project
 	@echo ""
 	@echo "📊 Deployment Status:"
 	@if kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "✅ Deployment '$(PROJECT_NAME)-deployment' found in namespace '$(NAMESPACE)'"; \oar
+		echo "✅ Deployment '$(PROJECT_NAME)-deployment' found in namespace '$(NAMESPACE)'"; \
 		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE); \
 		echo ""; \
 		echo "📊 Pod Status:"; \
@@ -493,7 +521,7 @@ status: validate-project
 			echo ""; \
 			echo "🔍 Recent Deployment Events:"; \
 			kubectl get events --field-selector involvedObject.name=$(PROJECT_NAME)-deployment \
-				--sort-by=.lastTimestamp -n $(NAMESPACE) 2>/dev/null | tail -5 || \
+				--sort-by=.lastTimestamp -n $(NAMESPACE) $(REDIRECT_OUTPUT) | tail -5 || \
 				echo "No events found"; \
 		fi; \
 	elif kubectl cluster-info $(REDIRECT_OUTPUT) 2>&1; then \
@@ -506,13 +534,13 @@ status: validate-project
 logs: validate-project
 	@echo "📜 Streaming logs for deployment '$(PROJECT_NAME)-deployment' (last $(LOG_TAIL_LINES) lines)"
 	@echo "  Press Ctrl+C to exit..."
-	@kubectl logs deployment/$(PROJECT_NAME)-deployment -f --tail=$(LOG_TAIL_LINES) -n $(NAMESPACE) 2>/dev/null || \
+	@kubectl logs deployment/$(PROJECT_NAME)-deployment -f --tail=$(LOG_TAIL_LINES) -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
 		(EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 130 ]; then \
 			echo "✅ Log streaming stopped by user"; \
 		else \
 			echo "⚠️ Log streaming failed - checking deployment status..."; \
-			kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) 2>/dev/null || \
+			kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
 				echo "❌ Deployment '$(PROJECT_NAME)-deployment' not found in namespace '$(NAMESPACE)'"; \
 		fi)
 
@@ -520,7 +548,7 @@ logs: validate-project
 watch: validate-project
 	@echo "👀 Watching pod status for project '$(PROJECT_NAME)' in namespace '$(NAMESPACE)'"
 	@echo "  Press Ctrl+C to exit..."
-	@if kubectl get namespace $(NAMESPACE) >/dev/null 2>&1; then \
+	@if kubectl get namespace $(NAMESPACE) $(REDIRECT_OUTPUT) 2>&1; then \
 		watch "kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE)"; \
 	else \
 		echo "❌ Namespace '$(NAMESPACE)' not found!"; \
@@ -529,14 +557,14 @@ watch: validate-project
 # Open an interactive shell in the running pod, fallback to /bin/bash if sh is unavailable
 shell: validate-project deployment-exists
 	@echo "🔓 Starting shell session in deployment '$(PROJECT_NAME)-deployment'..."
-	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' $(REDIRECT_OUTPUT)); \
 	if [ -n "$$POD_NAME" ]; then \
 		echo "🔓 Connecting to pod: $$POD_NAME"; \
-		if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- sh 2>/dev/null; then \
+		if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- sh $(REDIRECT_OUTPUT); then \
 			: ; \
 		else \
 			echo "⚠️ Shell '/bin/sh' failed - trying '/bin/bash'..."; \
-			if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- /bin/bash 2>/dev/null; then \
+			if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- /bin/bash $(REDIRECT_OUTPUT); then \
 				: ; \
 			else \
 				echo "❌ No shell available - pod may not be running or ready"; \
@@ -545,7 +573,7 @@ shell: validate-project deployment-exists
 		fi; \
 	else \
 		echo "❌ No pods found for deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'"; \
-		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) 2>/dev/null || \
+		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
 			echo "❌ Deployment not found"; \
 	fi
 
@@ -553,10 +581,10 @@ shell: validate-project deployment-exists
 health: validate-project deployment-exists
 	@echo "🏥 Health check for project '$(PROJECT_NAME)'"
 	@echo "============================================="
-	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' $(REDIRECT_OUTPUT)); \
 	if [ -n "$$POD_NAME" ]; then \
 		echo "Pod: $$POD_NAME"; \
-		READY=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null); \
+		READY=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].status.containerStatuses[0].ready}' $(REDIRECT_OUTPUT)); \
 		if [ "$$READY" = "true" ]; then \
 			echo "✅ Pod is ready and healthy"; \
 		else \
@@ -591,23 +619,23 @@ debug: validate-project
 	@docker images | grep "$(IMAGE_NAME)" || echo "❌ No matching images found for '$(IMAGE_NAME)'"
 	@echo ""
 	@echo "k3d Clusters:"
-	@clusters=$$(k3d cluster list 2>/dev/null | tail -n +2); \
+	@clusters=$$(k3d cluster list $(REDIRECT_OUTPUT) | tail -n +2); \
 	if [ -z "$$clusters" ]; then \
 		echo "❌ No clusters found"; \
 	else \
-		k3d cluster list 2>/dev/null; \
+		k3d cluster list $(REDIRECT_OUTPUT); \
 	fi
 	@echo ""
 	@echo "Deployments in namespace '$(NAMESPACE)':"
-	@kubectl get deployments -n $(NAMESPACE) 2>/dev/null || echo "❌ Cannot connect to cluster"
+	@kubectl get deployments -n $(NAMESPACE) $(REDIRECT_OUTPUT) || echo "❌ Cannot connect to cluster"
 	@echo ""
 	@echo "All Pods in namespace '$(NAMESPACE)':"
-	@kubectl get pods -n $(NAMESPACE) 2>/dev/null || echo "❌ Cannot connect to cluster"
+	@kubectl get pods -n $(NAMESPACE) $(REDIRECT_OUTPUT) || echo "❌ Cannot connect to cluster"
 	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 		echo ""; \
 		echo "Detailed Pod Information:"; \
-		kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o wide 2>/dev/null || echo "❌ No pods found"; \
+		kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o wide $(REDIRECT_OUTPUT) || echo "❌ No pods found"; \
 		echo ""; \
 		echo "Recent Events:"; \
-		kubectl get events -n $(NAMESPACE) --sort-by=.lastTimestamp | tail -10 2>/dev/null || echo "❌ No events found"; \
+		kubectl get events -n $(NAMESPACE) --sort-by=.lastTimestamp $(REDIRECT_OUTPUT) || echo "❌ No events found"; \
 	fi
