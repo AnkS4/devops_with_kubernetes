@@ -239,36 +239,48 @@ print-projects:
 check-deps: validate-project
 	@echo "🔍 Checking dependencies for project '$(PROJECT_NAME)'..."
 	@if command -v docker $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "✅ Docker found"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "✅ Docker found"; \
+		fi; \
 	else \
 		echo "❌ Docker not found!"; exit 1; \
 	fi
 	@if docker buildx version $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "✅ Docker buildx found"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "✅ Docker buildx found"; \
+		fi; \
 	else \
 		echo "❌ Docker buildx not found! DOCKER_BUILDKIT may not work properly"; \
 		echo "  Install appropriate plugin such as 'sudo pacman -S docker-buildx' for Arch Linux"; \
 		exit 1; \
 	fi
 	@if command -v k3d $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "✅ k3d found"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "✅ k3d found"; \
+		fi; \
 	else \
 		echo "❌ k3d not found!"; exit 1; \
 	fi
 	@if command -v kubectl $(REDIRECT_OUTPUT) 2>&1; then \
-		echo "✅ kubectl found"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "✅ kubectl found"; \
+		fi; \
 	else \
 		echo "❌ kubectl not found!"; exit 1; \
 	fi
 	@if test -f $(DOCKERFILE); then \
-		echo "✅ Dockerfile found at '$(DOCKERFILE)'"; \
+		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			echo "✅ Dockerfile found at '$(DOCKERFILE)'"; \
+		fi; \
 	else \
 		echo "❌ Dockerfile not found at '$(DOCKERFILE)'!"; exit 1; \
 	fi
 	@echo "🔍 Checking Dockerfile dependencies..."
 	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) $(REDIRECT_OUTPUT) | awk '{print $$2}' | grep -v '^http' | sort -u); do \
 		if [ -f "$(DOCKERFILE_DIR)$$file" ] || [ -d "$(DOCKERFILE_DIR)$$file" ]; then \
-			echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
+			if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+				echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
+			fi; \
 		else \
 			echo "❌ Missing: $(DOCKERFILE_DIR)$$file"; \
 			exit 1; \
@@ -318,7 +330,7 @@ build: validate-project
 			echo "  Dockerfile: $(DOCKERFILE)"; \
 			echo "  Build context: $(BUILD_CONTEXT)"; \
 		fi; \
-		for image in "$$IMAGE_NAME1" "$$IMAGE_NAME2"; do \
+		for image in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
 			if [ "$$image" = "$$IMAGE_NAME1" ]; then \
 				TARGET="generator"; \
 			else \
@@ -328,13 +340,15 @@ build: validate-project
 				echo "🔨 Building $$TARGET image..."; \
 			fi; \
 			if DOCKER_BUILDKIT=1 docker build -t "$$image" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
-				echo "✅ $$image built successfully"; \
+				if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+					echo "✅ $$image built successfully"; \
+				fi; \
 			else \
 				echo "❌ $$image build failed"; exit 1; \
 			fi; \
 		done; \
+	echo "✅ All images built successfully"; \
 	else \
-		echo "📦 Building Docker image for project '$(PROJECT_NAME)'..."; \
 		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 			echo "  Project: $(PROJECT_NAME)"; \
 			echo "  Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
@@ -399,9 +413,9 @@ preload-app-images: validate-project
 		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 			echo "📤 Importing application images '$$IMAGE_NAME1' and '$$IMAGE_NAME2'..."; \
 		fi; \
-		for img in "$$IMAGE_NAME1" "$$IMAGE_NAME2"; do \
-			if docker image inspect $$img $(REDIRECT_OUTPUT); then \
-				if k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+		for img in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
+			if docker image inspect "$$img" $(REDIRECT_OUTPUT); then \
+				if k3d image import "$$img" -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
 					if [ "$(DEBUG_ENABLED)" = "true" ]; then \
 						echo "✅ Successfully imported $$img"; \
 					fi; \
