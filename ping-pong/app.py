@@ -1,12 +1,12 @@
+import os
 from fastapi import FastAPI
-# import uvicorn
-# import os
+import uvicorn    
 
-# PORT = int(os.getenv("PORT", 8002))
+
+PORT = int(os.getenv("PORT", 8002))
+count = 0
 
 app = FastAPI()
-
-count = 0
 
 @app.get("/")
 def root():
@@ -19,5 +19,4 @@ def pingpong():
     return {"message": f"pong {count}"}
 
 if __name__ == "__main__":
-    # uvicorn.run(app, host="0.0.0.0", port=PORT)
-    app.run()
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
