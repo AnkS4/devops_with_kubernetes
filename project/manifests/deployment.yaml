@@ -15,12 +15,12 @@ spec:
         app: project
     spec:
       containers:
-      - name: project-container
-        image: project-app:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 8001
-        env:
-        - name: PORT
-          value: "8001"
+        - name: project-container
+          image: project-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+          env:
+            - name: PORT
+              value: "8001"
       restartPolicy: Always

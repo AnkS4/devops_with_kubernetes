@@ -15,12 +15,12 @@ spec:
         app: ping-pong
     spec:
       containers:
-      - name: ping-pong-container
-        image: ping-pong-app:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 8002
-        env:
-        - name: PORT
-          value: "8002"
+        - name: ping-pong-container
+          image: ping-pong-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+          env:
+            - name: PORT
+              value: "8002"
       restartPolicy: Always
