@@ -14,7 +14,8 @@ def status_updater():
         timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.') + f"{now.microsecond // 1000:03d}Z"
         random_string = str(uuid.uuid4())
         status = f"{timestamp}: {random_string}"
-        with LOG_FILE.open("a") as f:
+        # Overwrite the file to just write the current status
+        with LOG_FILE.open("w") as f:
             f.write(status)
         time.sleep(5)
 

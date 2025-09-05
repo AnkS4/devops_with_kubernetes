@@ -1,10 +1,6 @@
 from pathlib import Path
-import os
 from fastapi import FastAPI, HTTPException
-import uvicorn
 
-
-PORT = int(os.getenv("PORT", 8000))
 
 app = FastAPI()
 
@@ -19,11 +15,9 @@ def root():
 def status():
     try:
         with STATUS_FILE.open("r") as f:
-            return {"current_status": f.read()}
+            lines = f.readlines()
+            # Return last line
+            recent = lines[-1] if len(lines) > 0 else ""
+            return {"current_status": recent}
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Status not available yet. The log generator may be starting up.")
-
-if __name__ == "__main__":
-    # Ensure the shared directory exists
-    STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+        raise HTTPException(status_code=404, detail="Status not available yet.")
