@@ -336,13 +336,8 @@ build: validate-project
 			else \
 				TARGET="status"; \
 			fi; \
-			if [ "$(DEBUG)" = "1" ]; then \
-				echo "🔨 Building $$TARGET image..."; \
-			fi; \
-			if DOCKER_BUILDKIT=1 docker build -t "$$image" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
-				if [ "$(DEBUG)" = "1" ]; then \
-					echo "✅ $$image built successfully"; \
-				fi; \
+			if DOCKER_BUILDKIT=1 docker build -t "$$image" --target="$$TARGET" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
+				echo "✅ $$image built successfully"; \
 			else \
 				echo "❌ $$image build failed"; exit 1; \
 			fi; \
@@ -398,9 +393,7 @@ preload-critical-images: cluster-create
 		rancher/klipper-lb:v0.4.9; do \
 		docker pull $$img $(REDIRECT_OUTPUT) || true; \
 		k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
-		if [ "$(DEBUG)" = "1" ]; then \
-			echo "✅ Successfully imported $$img"; \
-		fi; \
+		echo "✅ Successfully imported $$img"; \
 	done; \
 	echo "✅ Successfully imported all critical cluster images"; \
 
@@ -416,9 +409,7 @@ preload-app-images: validate-project
 		for img in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
 			if docker image inspect "$$img" $(REDIRECT_OUTPUT); then \
 				if k3d image import "$$img" -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-					if [ "$(DEBUG)" = "1" ]; then \
-						echo "✅ Successfully imported $$img"; \
-					fi; \
+					echo "✅ Successfully imported $$img"; \
 				else \
 					echo "❌ Failed to import $$img"; exit 1; \
 				fi; \
@@ -431,9 +422,7 @@ preload-app-images: validate-project
 		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
 		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
 			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-				if [ "$(DEBUG)" = "1" ]; then \
-					echo "✅ Successfully imported $(IMAGE_NAME):$(IMAGE_TAG)"; \
-				fi; \
+				echo "✅ Successfully imported $(IMAGE_NAME):$(IMAGE_TAG)"; \
 			else \
 				echo "❌ Failed to import $(IMAGE_NAME):$(IMAGE_TAG)"; exit 1; \
 			fi; \
@@ -480,30 +469,46 @@ deploy: validate-project
 	@echo "✅ Deployment complete!"
 
 # Check Ingress endpoint
-ingress:
-	@echo "Checking Ingress endpoint..."; \
+ingress: validate-project
+	@echo "🌐 Checking Ingress endpoint..."; \
+	if [ "$(DEBUG)" = "1" ]; then \
+		echo "Debug: NAMESPACE=$(NAMESPACE)"; \
+		echo "Debug: INGRESS_NAME=$(INGRESS_NAME)"; \
+		echo "Debug: PROJECT_NAME=$(PROJECT_NAME)"; \
+	fi; \
 	for i in {1..10}; do \
-		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' $(REDIRECT_OUTPUT) || true); \
-		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' $(REDIRECT_OUTPUT) || true); \
-		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" $(REDIRECT_OUTPUT) || true); \
-		if [ -n "$$HOST" ] && [ -n "$$EXTERNAL_IP" ]; then break; fi; \
-		echo "Waiting for external IP and host to be assigned... (attempt $$i/10)"; sleep 5; \
+		if [ "$(DEBUG)" = "1" ]; then \
+			echo "Attempt $$i: Getting ingress info..."; \
+		fi; \
+		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
+		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
+		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
+		if [ "$(DEBUG)" = "1" ]; then \
+			echo "Debug: HOST=$$HOST, EXTERNAL_IP=$$EXTERNAL_IP, EXTERNAL_PORT=$$EXTERNAL_PORT"; \
+		fi; \
+		if [ -n "$$HOST" ] && [ -n "$$EXTERNAL_IP" ]; then \
+			break; \
+		fi; \
+		echo "Waiting for external IP and host to be assigned... (attempt $$i/10)"; \
+		sleep 5; \
 	done; \
 	PATH_SUFFIX=""; \
 	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
-	echo "🌐 Access via URL: "; \
-	echo "http://$$HOST$$PATH_SUFFIX by adding '$$EXTERNAL_IP $$HOST' to /etc/hosts"; \
-	echo "OR by: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"; \
-	if [ "$$HOST" = "" ]; then \
-		echo "❌ Ingress host not found"; exit 1; \
+	if [ -z "$$HOST" ]; then \
+		echo "❌ Ingress host not found. Checking ingress status:"; \
+		kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) 2>/dev/null || echo "Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'"; \
+		exit 1; \
 	fi; \
 	if [ "$$HOST" = "*" ]; then \
 		echo "⚠️ Ingress host is '*'. Set a real host (e.g., 'host: myapp.example.com')."; \
 		echo "Endpoint not accessible. See: 'kubectl get ingress -n $(NAMESPACE)'"; \
 		exit 0; \
-	fi;
-	
+	fi; \
+	echo "🌐 Access via URL:"; \
+	echo "  http://$$HOST$$PATH_SUFFIX by adding '$$EXTERNAL_IP $$HOST' to /etc/hosts"; \
+	echo "  OR by: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"
+
 # Show status of Docker, cluster, and deployment (with debug info if enabled)
 status: validate-project
 	@echo "📊 System Status for Project '$(PROJECT_NAME)'"
