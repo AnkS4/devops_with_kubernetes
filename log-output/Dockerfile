@@ -3,7 +3,6 @@ FROM python:3.12-slim AS base
 
 # Common environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
 
 # Create shared directory
 RUN mkdir -p /app/shared
@@ -22,5 +21,4 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY log_status.py .
-EXPOSE $PORT
-CMD ["python", "log_status.py", "$PORT"]
+CMD ["uvicorn", "log_status:app", "--host", "0.0.0.0", "--port", "8002"]
