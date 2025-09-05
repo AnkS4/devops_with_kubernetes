@@ -70,7 +70,7 @@ help:
 	@echo ""
 	@echo "⚙️ Key Variables:"
 	@echo "  PROJECT_NAME=my-app  Set project name (required)"
-	@echo "  DEBUG_ENABLED=true   Verbose output"
+	@echo "  DEBUG=1   Verbose output"
 	@echo "  NAMESPACE=testing    Custom namespace"
 	@echo "  AGENTS=1            Single agent node"
 	@echo ""
@@ -79,13 +79,13 @@ help:
 	@echo " Method 1: Choosing a specific project to run make"
 	@echo "   make rebuild PROJECT_NAME=ping-pong                # Build and deploy ping-pong project"
 	@echo "   make clean PROJECT_NAME=project                    # Clean up a specific project"
-	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=2 DEBUG_ENABLED=true  # Rebuild with debug output and two agents"
+	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=2 DEBUG=1  # Rebuild with debug output and two agents"
 	@echo "   make rebuild                                               # Rebuild with default agent(s)"
 	@echo ""
 	@echo " Method 2: Choosing all projects to run make"
 	@echo "   make all-projects TARGET=rebuild AGENTS=2                   # Fresh start with two agents for all projects"
 	@echo "   make all-projects TARGET=clean                              # Clean up all projects"
-	@echo "   make all-projects TARGET=rebuild AGENTS=2 DEBUG_ENABLED=true # Rebuild all projects with debug output and two agents"
+	@echo "   make all-projects TARGET=rebuild AGENTS=2 DEBUG=1 # Rebuild all projects with debug output and two agents"
 	@echo "   make all-projects                                          # Rebuild all projects with default agent(s)"
 	@echo ""
 	@echo "🤔 Troubleshooting Tips:"
@@ -111,7 +111,7 @@ CLUSTER_TIMEOUT     ?= 300s
 POD_READY_TIMEOUT   ?= 30
 LOG_TAIL_LINES      ?= 50
 RESTART_POLICY      ?= Never
-DEBUG_ENABLED       ?= false
+DEBUG               ?= 0
 K3D_RESOLV_FILE     ?= k3s-resolv.conf
 K3D_FIX_DNS         ?= 0
 
@@ -151,8 +151,8 @@ TRAEFIK_HTTPS_PORT ?= $(call find_available_port,8443)
 # Automatically detect build context based on Dockerfile location
 BUILD_CONTEXT ?= $(DOCKERFILE_DIR)
 
-# Set debug/verbosity flags for tools based on DEBUG_ENABLED
-ifeq ($(DEBUG_ENABLED),true)
+# Set debug/verbosity flags for tools based on DEBUG
+ifeq ($(DEBUG),1)
 	KUBECTL_VERBOSITY := --v=6
 	DOCKER_BUILD_FLAGS := --progress=plain
 	K3D_VERBOSITY :=
@@ -229,7 +229,7 @@ config: validate-project
 	@echo "  IMAGE_PULL_POLICY: $(IMAGE_PULL_POLICY)"
 	@echo "  RESTART_POLICY: $(RESTART_POLICY)"
 	@echo "  POD_READY_TIMEOUT: $(POD_READY_TIMEOUT)s"
-	@echo "  DEBUG_ENABLED: $(DEBUG_ENABLED)"
+	@echo "  DEBUG: $(DEBUG)"
 
 # Print all projects
 print-projects:
@@ -239,14 +239,14 @@ print-projects:
 check-deps: validate-project
 	@echo "🔍 Checking dependencies for project '$(PROJECT_NAME)'..."
 	@if command -v docker $(REDIRECT_OUTPUT) 2>&1; then \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "✅ Docker found"; \
 		fi; \
 	else \
 		echo "❌ Docker not found!"; exit 1; \
 	fi
 	@if docker buildx version $(REDIRECT_OUTPUT) 2>&1; then \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "✅ Docker buildx found"; \
 		fi; \
 	else \
@@ -255,21 +255,21 @@ check-deps: validate-project
 		exit 1; \
 	fi
 	@if command -v k3d $(REDIRECT_OUTPUT) 2>&1; then \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "✅ k3d found"; \
 		fi; \
 	else \
 		echo "❌ k3d not found!"; exit 1; \
 	fi
 	@if command -v kubectl $(REDIRECT_OUTPUT) 2>&1; then \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "✅ kubectl found"; \
 		fi; \
 	else \
 		echo "❌ kubectl not found!"; exit 1; \
 	fi
 	@if test -f $(DOCKERFILE); then \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "✅ Dockerfile found at '$(DOCKERFILE)'"; \
 		fi; \
 	else \
@@ -278,7 +278,7 @@ check-deps: validate-project
 	@echo "🔍 Checking Dockerfile dependencies..."
 	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) $(REDIRECT_OUTPUT) | awk '{print $$2}' | grep -v '^http' | sort -u); do \
 		if [ -f "$(DOCKERFILE_DIR)$$file" ] || [ -d "$(DOCKERFILE_DIR)$$file" ]; then \
-			if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			if [ "$(DEBUG)" = "1" ]; then \
 				echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
 			fi; \
 		else \
@@ -291,7 +291,7 @@ check-deps: validate-project
 # Remove all created resources: deployment, cluster, and Docker image
 clean: validate-project
 	@echo "🧹 Cleaning resources for project '$(PROJECT_NAME)'..."
-	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+	@if [ "$(DEBUG)" = "1" ]; then \
 		echo "🗑️ Deleting deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'..."; \
 		if kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true $(REDIRECT_OUTPUT); then \
 			echo "✅ Deployment deleted"; \
@@ -323,7 +323,7 @@ build: validate-project
 	@if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
 		IMAGE_NAME2="$(IMAGE_NAME)-status:$(IMAGE_TAG)"; \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "  Project: $(PROJECT_NAME)"; \
 			echo "  Generator Image: $${IMAGE_NAME1}"; \
 			echo "  Status Image: $${IMAGE_NAME2}"; \
@@ -336,11 +336,11 @@ build: validate-project
 			else \
 				TARGET="status"; \
 			fi; \
-			if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+			if [ "$(DEBUG)" = "1" ]; then \
 				echo "🔨 Building $$TARGET image..."; \
 			fi; \
 			if DOCKER_BUILDKIT=1 docker build -t "$$image" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
-				if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+				if [ "$(DEBUG)" = "1" ]; then \
 					echo "✅ $$image built successfully"; \
 				fi; \
 			else \
@@ -349,7 +349,7 @@ build: validate-project
 		done; \
 	echo "✅ All images built successfully"; \
 	else \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "  Project: $(PROJECT_NAME)"; \
 			echo "  Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
 			echo "  Dockerfile: $(DOCKERFILE)"; \
@@ -367,12 +367,12 @@ cluster-create: validate-project
 	@echo "🔧 Setting up cluster '$(CLUSTER_NAME)'..."
 	@if k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
 		echo "✅ Cluster '$(CLUSTER_NAME)' exists"; \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "🔧 Starting cluster if stopped..."; \
 		fi; \
 		k3d cluster start $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
 	else \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "🔧 Creating cluster '$(CLUSTER_NAME)' with $(AGENTS) agent(s)..."; \
 		fi; \
 		if K3D_FIX_DNS=$(K3D_FIX_DNS) k3d cluster create $(CLUSTER_NAME) -a $(AGENTS) --wait \
@@ -398,7 +398,7 @@ preload-critical-images: cluster-create
 		rancher/klipper-lb:v0.4.9; do \
 		docker pull $$img $(REDIRECT_OUTPUT) || true; \
 		k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "✅ Successfully imported $$img"; \
 		fi; \
 	done; \
@@ -410,13 +410,13 @@ preload-app-images: validate-project
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
 		IMAGE_NAME2="$(IMAGE_NAME)-status:$(IMAGE_TAG)"; \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "📤 Importing application images '$$IMAGE_NAME1' and '$$IMAGE_NAME2'..."; \
 		fi; \
 		for img in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
 			if docker image inspect "$$img" $(REDIRECT_OUTPUT); then \
 				if k3d image import "$$img" -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-					if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+					if [ "$(DEBUG)" = "1" ]; then \
 						echo "✅ Successfully imported $$img"; \
 					fi; \
 				else \
@@ -431,7 +431,7 @@ preload-app-images: validate-project
 		echo "📤 Importing application image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
 		if docker image inspect $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
 			if k3d image import $(IMAGE_NAME):$(IMAGE_TAG) -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-				if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+				if [ "$(DEBUG)" = "1" ]; then \
 					echo "✅ Successfully imported $(IMAGE_NAME):$(IMAGE_TAG)"; \
 				fi; \
 			else \
@@ -445,7 +445,7 @@ preload-app-images: validate-project
 
 deploy: validate-project
 	@echo "🚀 Deploying application '$(PROJECT_NAME)'..."
-	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+	@if [ "$(DEBUG)" = "1" ]; then \
 		echo " Deployment: $(PROJECT_NAME)-deployment"; \
 		echo " Namespace: $(NAMESPACE)"; \
 		if [ "$(PROJECT_NAME)" = "log-output" ]; then \
@@ -461,7 +461,7 @@ deploy: validate-project
 	fi
 	@echo "🗂️ Checking for namespace '$(NAMESPACE)'..."
 	@if ! kubectl get ns $(NAMESPACE) $(REDIRECT_OUTPUT); then \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo "Namespace '$(NAMESPACE)' does not exist. Creating..."; \
 		fi; \
 		kubectl create ns $(NAMESPACE); \
@@ -508,7 +508,7 @@ ingress:
 status: validate-project
 	@echo "📊 System Status for Project '$(PROJECT_NAME)'"
 	@echo "============================================="
-	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+	@if [ "$(DEBUG)" = "1" ]; then \
 		echo "🐳 Docker:"; \
 		docker --version $(REDIRECT_OUTPUT) || echo "❌ Docker not available"; \
 		echo ""; \
@@ -517,7 +517,7 @@ status: validate-project
 	@if k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
 		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
 		echo "✅ Cluster '$(CLUSTER_NAME)' - Status: $$STATUS"; \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			k3d cluster list | grep -E "(NAME|$(CLUSTER_NAME))"; \
 		fi; \
 	else \
@@ -531,7 +531,7 @@ status: validate-project
 		echo ""; \
 		echo "📊 Pod Status:"; \
 		kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE); \
-		if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+		if [ "$(DEBUG)" = "1" ]; then \
 			echo ""; \
 			echo "🔍 Recent Deployment Events:"; \
 			kubectl get events --field-selector involvedObject.name=$(PROJECT_NAME)-deployment \
@@ -645,7 +645,7 @@ debug: validate-project
 	@echo ""
 	@echo "All Pods in namespace '$(NAMESPACE)':"
 	@kubectl get pods -n $(NAMESPACE) $(REDIRECT_OUTPUT) || echo "❌ Cannot connect to cluster"
-	@if [ "$(DEBUG_ENABLED)" = "true" ]; then \
+	@if [ "$(DEBUG)" = "1" ]; then \
 		echo ""; \
 		echo "Detailed Pod Information:"; \
 		kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o wide $(REDIRECT_OUTPUT) || echo "❌ No pods found"; \
