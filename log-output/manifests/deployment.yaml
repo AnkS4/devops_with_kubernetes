@@ -18,17 +18,20 @@ spec:
         - name: log-output-generator
           image: log-output-app-generator:latest
           imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8001
+              protocol: TCP
           volumeMounts:
             - name: shared-volume
               mountPath: /app/shared
         - name: log-output-status
           image: log-output-app-status:latest
           imagePullPolicy: IfNotPresent
-          env:
-            - name: PORT
-              value: "8000"
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8002
+              protocol: TCP
           volumeMounts:
             - name: shared-volume
               mountPath: /app/shared
