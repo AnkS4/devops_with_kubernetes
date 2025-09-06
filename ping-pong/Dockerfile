@@ -12,4 +12,4 @@ COPY app.py .
 
 EXPOSE $PORT
 
-CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT}"
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "${PORT}"]
