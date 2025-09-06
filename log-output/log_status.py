@@ -14,10 +14,8 @@ def root():
 @app.get("/status")
 def status():
     try:
+        # Return single line file
         with STATUS_FILE.open("r") as f:
-            lines = f.readlines()
-            # Return last line
-            recent = lines[-1] if len(lines) > 0 else ""
-            return {"current_status": recent}
+            return {"current_status": f.read()}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Status not available yet.")
