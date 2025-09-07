@@ -351,9 +351,9 @@ build: validate-project
 			echo "  Build context: $(BUILD_CONTEXT)"; \
 		fi; \
 		if DOCKER_BUILDKIT=1 docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
-			echo "✅ Image built successfully"; \
+			echo "✅ $$(IMAGE_NAME):$$(IMAGE_TAG) built successfully"; \
 		else \
-			echo "❌ Image build failed"; exit 1; \
+			echo "❌ $$(IMAGE_NAME):$$(IMAGE_TAG) build failed"; exit 1; \
 		fi; \
 	fi
 
