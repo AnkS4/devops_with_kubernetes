@@ -21,7 +21,8 @@ PROJECTS := $(shell \
 # Default target to run
 TARGET ?= all
 
-.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy all status logs shell rebuild
+.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy all status logs shell rebuild validate ingress watch debug health restart config print-projects deployment-exists cluster-exists
+
 .DEFAULT_GOAL := default
 
 default: help
@@ -351,9 +352,9 @@ build: validate-project
 			echo "  Build context: $(BUILD_CONTEXT)"; \
 		fi; \
 		if DOCKER_BUILDKIT=1 docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
-			echo "✅ $$(IMAGE_NAME):$$(IMAGE_TAG) built successfully"; \
+			echo "✅ $(IMAGE_NAME):$(IMAGE_TAG) built successfully"; \
 		else \
-			echo "❌ $$(IMAGE_NAME):$$(IMAGE_TAG) build failed"; exit 1; \
+			echo "❌ $(IMAGE_NAME):$(IMAGE_TAG) build failed"; exit 1; \
 		fi; \
 	fi
 
@@ -398,7 +399,7 @@ preload-critical-images: cluster-create
 	echo "✅ Successfully imported all critical cluster images"; \
 
 # Preload application images
-preload-app-images: validate-project
+preload-app-images: validate-project cluster-create
 	@echo "📥 Preloading application images..."; \
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
