@@ -115,23 +115,39 @@ RESTART_POLICY      ?= Never
 DEBUG               ?= 0
 K3D_RESOLV_FILE     ?= k3s-resolv.conf
 K3D_FIX_DNS         ?= 0
+PORT_MIN            ?= 8000
+PORT_MAX            ?= 8099
+PORT_HOST           ?= 127.0.0.1
 
 # Function to find an available port starting from a base port
 define find_available_port
 $(shell \
-  port=$(1); \
-  while [ $$port -lt 65535 ]; do \
-    AVAILABLE=1; \
+  base=$(1); \
+  min=$(PORT_MIN); max=$(PORT_MAX); host=$(PORT_HOST); \
+  # clamp start to [min, max]
+  if [ -z "$$base" ]; then base=$$min; fi; \
+  if [ $$base -lt $$min ]; then start=$$min; else start=$$base; fi; \
+  if [ $$start -gt $$max ]; then exit 0; fi; \
+  port=$$start; \
+  while [ $$port -le $$max ]; do \
     if command -v ss >/dev/null 2>&1; then \
-      ss -Hln "sport = :$$port" 2>/dev/null | grep -q . && AVAILABLE=0 || AVAILABLE=1; \
-    elif command -v netstat >/dev/null 2>&1; then \
-      netstat -an 2>/dev/null | grep -E "LISTEN|LISTENING" | grep -E "[:.]$$port[[:space:]]" >/dev/null && AVAILABLE=0 || AVAILABLE=1; \
+      # ss prints nothing when no socket matches; grep -q . means "used"
+      if ss -Hln "sport = :$$port" 2>/dev/null | grep -q .; then \
+        :; \
+      else \
+        echo $$port; exit 0; \
+      fi; \
     elif command -v lsof >/dev/null 2>&1; then \
-      lsof -PiTCP:$$port -sTCP:LISTEN -n 2>/dev/null | grep -q . && AVAILABLE=0 || AVAILABLE=1; \
+      if lsof -PiTCP:$$port -sTCP:LISTEN -n 2>/dev/null | grep -q .; then \
+        :; \
+      else \
+        echo $$port; exit 0; \
+      fi; \
     else \
-      (echo > /dev/tcp/127.0.0.1/$$port) >/dev/null 2>&1 && AVAILABLE=0 || AVAILABLE=1; \
+      # /dev/tcp returns success when something is listening (port used)
+      (echo > /dev/tcp/$$host/$$port) >/dev/null 2>&1 && used=1 || used=0; \
+      if [ $$used -eq 0 ]; then echo $$port; exit 0; fi; \
     fi; \
-    if [ $$AVAILABLE -eq 1 ]; then echo $$port; exit 0; fi; \
     port=$$((port + 1)); \
   done \
 )
