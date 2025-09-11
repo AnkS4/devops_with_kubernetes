@@ -409,8 +409,11 @@ preload-critical-images: cluster-create
 		rancher/mirrored-library-traefik:2.11.18 \
 		rancher/klipper-lb:v0.4.9; do \
 		docker pull $$img $(REDIRECT_OUTPUT) || true; \
-		k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		if k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
 		echo "✅ Successfully imported $$img"; \
+		else \
+			echo "⚠️ Failed to import $$img (continuing)"; \
+		fi; \
 	done; \
 	echo "✅ Successfully imported all critical cluster images"; \
 
@@ -517,6 +520,11 @@ ingress: validate-project
 		kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) 2>/dev/null || echo "Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'"; \
 		exit 1; \
 	fi; \
+	# Fallback to localhost if EXTERNAL_IP not present (typical with k3d + klipper-lb)
+	if [ -z "$$EXTERNAL_IP" ]; then \
+		EXTERNAL_IP=127.0.0.1; \
+		EXTERNAL_PORT=$(TRAEFIK_HTTP_PORT); \
+	fi; \
 	if [ "$$HOST" = "*" ]; then \
 		echo "⚠️ Ingress host is '*'. Set a real host (e.g., 'host: myapp.example.com')."; \
 		echo "Endpoint not accessible. See: 'kubectl get ingress -n $(NAMESPACE)'"; \
@@ -585,7 +593,12 @@ watch: validate-project
 	@echo "👀 Watching pod status for project '$(PROJECT_NAME)' in namespace '$(NAMESPACE)'"
 	@echo "  Press Ctrl+C to exit..."
 	@if kubectl get namespace $(NAMESPACE) $(REDIRECT_OUTPUT) 2>&1; then \
+		if command -v watch >/dev/null 2>&1; then \
 		watch "kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE)"; \
+		else \
+			echo "⚠️ 'watch' not found. Falling back to 'kubectl get pods -w'"; \
+			kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -w; \
+		fi; \
 	else \
 		echo "❌ Namespace '$(NAMESPACE)' not found!"; \
 	fi
