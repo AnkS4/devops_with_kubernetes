@@ -496,6 +496,12 @@ ingress: validate-project
 		echo "Debug: INGRESS_NAME=$(INGRESS_NAME)"; \
 		echo "Debug: PROJECT_NAME=$(PROJECT_NAME)"; \
 	fi; \
+	# Early guard: fail fast if Ingress object is missing
+	if ! kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) $(REDIRECT_OUTPUT); then \
+		echo "❌ Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'."; \
+		echo "   Ensure your manifests create it (e.g., $(MANIFEST_DIR)/ingress.yaml or kustomization)."; \
+		exit 1; \
+	fi; \
 	for i in {1..10}; do \
 		if [ "$(DEBUG)" = "1" ]; then \
 			echo "Attempt $$i: Getting ingress info..."; \
