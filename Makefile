@@ -118,6 +118,8 @@ K3D_FIX_DNS         ?= 0
 PORT_MIN            ?= 8000
 PORT_MAX            ?= 8099
 PORT_HOST           ?= 127.0.0.1
+INGRESS_RETRIES     ?= 10
+INGRESS_WAIT_SECONDS ?= 5
 
 # Function to find an available port starting from a base port
 define find_available_port
@@ -408,7 +410,11 @@ preload-critical-images: cluster-create
 		rancher/klipper-helm:v0.9.3-build20241008 \
 		rancher/mirrored-library-traefik:2.11.18 \
 		rancher/klipper-lb:v0.4.9; do \
-		docker pull $$img $(REDIRECT_OUTPUT) || true; \
+		if docker image inspect $$img $(REDIRECT_OUTPUT); then \
+			if [ "$(DEBUG)" = "1" ]; then echo "⏭️ Using local image $$img"; fi; \
+		else \
+			docker pull $$img $(REDIRECT_OUTPUT) || true; \
+		fi; \
 		if k3d image import $$img -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
 		echo "✅ Successfully imported $$img"; \
 		else \
@@ -490,52 +496,51 @@ deploy: validate-project
 
 # Check Ingress endpoint
 ingress: validate-project
-	@echo "🌐 Checking Ingress endpoint..."; \
+	@set -e; \
+	echo "🌐 Checking Ingress endpoint..."; \
 	if [ "$(DEBUG)" = "1" ]; then \
 		echo "Debug: NAMESPACE=$(NAMESPACE)"; \
 		echo "Debug: INGRESS_NAME=$(INGRESS_NAME)"; \
 		echo "Debug: PROJECT_NAME=$(PROJECT_NAME)"; \
 	fi; \
-	# Early guard: fail fast if Ingress object is missing
+	# Early guard: fail fast if Ingress object is missing; \
 	if ! kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) $(REDIRECT_OUTPUT); then \
 		echo "❌ Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'."; \
 		echo "   Ensure your manifests create it (e.g., $(MANIFEST_DIR)/ingress.yaml or kustomization)."; \
 		exit 1; \
 	fi; \
-	for i in {1..10}; do \
-		if [ "$(DEBUG)" = "1" ]; then \
-			echo "Attempt $$i: Getting ingress info..."; \
-		fi; \
-		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
-		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
-		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
-		if [ "$(DEBUG)" = "1" ]; then \
-			echo "Debug: HOST=$$HOST, EXTERNAL_IP=$$EXTERNAL_IP, EXTERNAL_PORT=$$EXTERNAL_PORT"; \
-		fi; \
-		if [ -n "$$HOST" ] && [ -n "$$EXTERNAL_IP" ]; then \
+	HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
+	EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
+	EXTERNAL_HOSTNAME=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
+	EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
+	for i in $$(seq 1 $(INGRESS_RETRIES)); do \
+		if [ -n "$$HOST" ] && { [ -n "$$EXTERNAL_IP" ] || [ -n "$$EXTERNAL_HOSTNAME" ]; }; then \
 			break; \
 		fi; \
-		echo "Waiting for external IP and host to be assigned... (attempt $$i/10)"; \
-		sleep 5; \
+		if [ "$(DEBUG)" = "1" ]; then \
+			echo "Attempt $$i/$(INGRESS_RETRIES): Getting ingress info..."; \
+		fi; \
+		echo "Waiting for external IP and host to be assigned... (attempt $$i/$(INGRESS_RETRIES))"; \
+		sleep $(INGRESS_WAIT_SECONDS); \
+		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
+		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
+		EXTERNAL_HOSTNAME=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
+		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
 	done; \
-	PATH_SUFFIX=""; \
-	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
-	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
 	if [ -z "$$HOST" ]; then \
 		echo "❌ Ingress host not found. Checking ingress status:"; \
 		kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) 2>/dev/null || echo "Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'"; \
 		exit 1; \
 	fi; \
-	# Fallback to localhost if EXTERNAL_IP not present (typical with k3d + klipper-lb)
-	if [ -z "$$EXTERNAL_IP" ]; then \
+	# Fallback to localhost if EXTERNAL_IP/hostname not present (typical with k3d + klipper-lb); \
+	if [ -z "$$EXTERNAL_IP" ] && [ -z "$$EXTERNAL_HOSTNAME" ]; then \
 		EXTERNAL_IP=127.0.0.1; \
 		EXTERNAL_PORT=$(TRAEFIK_HTTP_PORT); \
+		if [ -z "$$EXTERNAL_PORT" ]; then EXTERNAL_PORT=80; fi; \
 	fi; \
-	if [ "$$HOST" = "*" ]; then \
-		echo "⚠️ Ingress host is '*'. Set a real host (e.g., 'host: myapp.example.com')."; \
-		echo "Endpoint not accessible. See: 'kubectl get ingress -n $(NAMESPACE)'"; \
-		exit 0; \
-	fi; \
+	PATH_SUFFIX=""; \
+	if [ "$(PROJECT_NAME)" = "ping-pong" ]; then PATH_SUFFIX="/pingpong"; fi; \
+	if [ "$(PROJECT_NAME)" = "log-output" ]; then PATH_SUFFIX="/status"; fi; \
 	echo "🌐 Access via URL:"; \
 	echo "  http://$$HOST$$PATH_SUFFIX by adding '$$EXTERNAL_IP $$HOST' to /etc/hosts"; \
 	echo "  OR by: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"
