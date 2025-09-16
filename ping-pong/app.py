@@ -1,7 +1,26 @@
+import os
+import json
 from fastapi import FastAPI
+from pathlib import Path
 
-count = 0
 app = FastAPI()
+
+# Path to the shared file
+SHARED_FILE = os.getenv('SHARED_VOLUME_PATH', '/app/shared/request_count.txt')
+
+# Ensure the directory exists
+Path(SHARED_FILE).parent.mkdir(parents=True, exist_ok=True)
+
+def read_count():
+    try:
+        with open(SHARED_FILE, 'r') as f:
+            return int(f.read().strip() or 0)
+    except (FileNotFoundError, ValueError):
+        return 0
+
+def write_count(count):
+    with open(SHARED_FILE, 'w') as f:
+        f.write(str(count))
 
 @app.get("/")
 def root():
@@ -9,6 +28,6 @@ def root():
 
 @app.get("/pingpong")
 def pingpong():
-    global count
-    count += 1
+    count = read_count() + 1
+    write_count(count)
     return {"message": f"pong {count}"}

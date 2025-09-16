@@ -23,8 +23,11 @@ spec:
               containerPort: 8001
               protocol: TCP
           volumeMounts:
-            - name: shared-volume
+            - name: shared-storage
               mountPath: /app/shared
+          env:
+            - name: SHARED_VOLUME_PATH
+              value: "/app/shared/request_count.txt"
         - name: log-output-status
           image: log-output-app-status:latest
           imagePullPolicy: IfNotPresent
@@ -33,10 +36,14 @@ spec:
               containerPort: 8002
               protocol: TCP
           volumeMounts:
-            - name: shared-volume
+            - name: shared-storage
               mountPath: /app/shared
               readOnly: true
+          env:
+            - name: SHARED_VOLUME_PATH
+              value: "/app/shared/request_count.txt"
       volumes:
-        - name: shared-volume
-          emptyDir: {}
+        - name: shared-storage
+          persistentVolumeClaim:
+            claimName: shared-storage-claim
       restartPolicy: Always
