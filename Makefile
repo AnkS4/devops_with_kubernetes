@@ -21,7 +21,7 @@ PROJECTS := $(shell \
 # Default target to run
 TARGET ?= all
 
-.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy all status logs shell rebuild validate ingress watch debug health restart config print-projects deployment-exists cluster-exists
+.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy all status logs shell rebuild validate ingress watch debug health restart config print-projects deployment-exists cluster-exists apply-pv delete-pv clean-all multi
 
 .DEFAULT_GOAL := default
 
@@ -78,16 +78,18 @@ help:
 	@echo "💡 Examples:"
 	@echo " ---Two methods to run make---"
 	@echo " Method 1: Choosing a specific project to run make"
-	@echo "   make rebuild PROJECT_NAME=ping-pong                # Build and deploy ping-pong project"
-	@echo "   make clean PROJECT_NAME=project                    # Clean up a specific project"
-	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=2 DEBUG=1  # Rebuild with debug output and two agents"
-	@echo "   make rebuild                                               # Rebuild with default agent(s)"
+	@echo "   make rebuild PROJECT_NAME=ping-pong                                 # Build and deploy ping-pong project"
+	@echo "   make multi TARGET=rebuild PROJECT_NAME="ping-pong, log-output"      # Build and deploy ping-pong and log-output projects"
+	@echo "   make clean PROJECT_NAME=project                                     # Clean up a specific project"
+	@echo "   make delete-pv PROJECT_NAME=project                                 # Delete PersistentVolume for a specific project"
+	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=2 DEBUG=1                 # Rebuild with debug output and two agents"
+	@echo "   make rebuild                                                        # Rebuild with default agent(s)"
 	@echo ""
 	@echo " Method 2: Choosing all projects to run make"
 	@echo "   make all-projects TARGET=rebuild AGENTS=2                   # Fresh start with two agents for all projects"
 	@echo "   make all-projects TARGET=clean                              # Clean up all projects"
-	@echo "   make all-projects TARGET=rebuild AGENTS=2 DEBUG=1 # Rebuild all projects with debug output and two agents"
-	@echo "   make all-projects                                          # Rebuild all projects with default agent(s)"
+	@echo "   make all-projects TARGET=rebuild AGENTS=2 DEBUG=1           # Rebuild all projects with debug output and two agents"
+	@echo "   make all-projects                                            # Rebuild all projects with default agent(s)"
 	@echo ""
 	@echo "🤔 Troubleshooting Tips:"
 	@echo "  Missing files? Check your project directory and ensure all required files are present."
@@ -216,10 +218,10 @@ cluster-exists: validate-project
 # ============================================================================
 
 # Remove all resources and rebuild from scratch
-rebuild: validate-project check-deps clean build cluster-create preload-critical-images preload-app-images deploy ingress
+rebuild: validate-project check-deps clean build cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
 
-# Full workflow: validate, clean, build image, create cluster, deploy and ingress
-all: validate-project check-deps clean build cluster-create preload-critical-images preload-app-images deploy ingress
+# Full workflow: validate, build image, create cluster, apply pv, deploy and ingress
+all: validate-project check-deps build cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
 
 # Validate project and dependencies
 validate: validate-project check-deps
@@ -466,7 +468,7 @@ deploy: validate-project
 		if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 			echo " Images: log-output-generator:latest, log-output-status:latest"; \
 		else \
-			echo " Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
+		echo " Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
 		fi; \
 		echo " Image Pull Policy: $(IMAGE_PULL_POLICY)"; \
 		echo "🔍 Verifying cluster connection..."; \
@@ -699,3 +701,48 @@ debug: validate-project
 		echo "Recent Events:"; \
 		kubectl get events -n $(NAMESPACE) --sort-by=.lastTimestamp $(REDIRECT_OUTPUT) || echo "❌ No events found"; \
 	fi
+
+# Apply persistent volume
+apply-pv: validate-project
+	@echo "💾 Applying PersistentVolume configuration for project '$(PROJECT_NAME)'..."
+	@if [ -f "persistentvolume.yaml" ]; then \
+		if ! kubectl get nodes $(REDIRECT_OUTPUT); then \
+			echo "⚠️  No Kubernetes nodes found (cluster not ready). Skipping PV apply."; \
+		else \
+			NODE=$$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | grep agent); \
+			CONTAINER_ID=$$(docker ps -q --filter "name=$$NODE"); \
+			if [ -n "$$CONTAINER_ID" ]; then \
+				docker exec $$CONTAINER_ID mkdir -p /tmp/kube; \
+			fi; \
+			sed "s/REPLACE_NODE_NAME/$$NODE/g" persistentvolume.yaml | kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
+			echo "✅ PersistentVolume applied successfully"; \
+		fi; \
+	else \
+		echo "ℹ️  No cluster-scoped persistentvolume.yaml found in repo root; skipping PV apply"; \
+	fi
+
+# Delete persistent volume
+delete-pv:
+	@echo "🗑️  Deleting PersistentVolume..."
+	@if [ -f "persistentvolume.yaml" ]; then \
+		echo "🔍 Checking for existing PVCs..."; \
+		if kubectl get pvc -A --no-headers 2>/dev/null | grep -q shared-storage-claim; then \
+			echo "⚠️  Found PVCs still using the PV. Force deleting PVCs..."; \
+			kubectl delete pvc shared-storage-claim --all-namespaces --grace-period=0 --force --timeout=5s 2>/dev/null || true; \
+		fi; \
+		echo "🗑️  Removing finalizers from PV..."; \
+		kubectl patch pv $(shell kubectl get pv -o jsonpath='{.items[?(@.spec.claimRef.name=="shared-storage-claim")].metadata.name}') -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
+		echo "🔨 Deleting PV..."; \
+		kubectl delete -f persistentvolume.yaml --grace-period=0 --force --timeout=5s 2>/dev/null || true; \
+		echo "✅ PersistentVolume cleanup completed"; \
+	else \
+		echo "❌ persistentvolume.yaml not found in the current directory"; \
+		exit 1; \
+	fi
+
+# Run TARGET for a comma-separated list in PROJECT_NAME (e.g., "ping-pong, log-output")
+multi:
+	@for p in $(shell echo $(PROJECT_NAME) | tr ',' ' ' | xargs); do \
+		echo "==== Running '$(TARGET)' for $$p ===="; \
+		$(MAKE) $(TARGET) PROJECT_NAME=$$p; \
+	done
