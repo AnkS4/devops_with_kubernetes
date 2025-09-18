@@ -105,9 +105,9 @@ IMAGE_TAG           ?= latest
 DOCKERFILE          ?= $(PROJECT_NAME)/Dockerfile
 DOCKERFILE_DIR      := $(dir $(DOCKERFILE))
 DOCKER_BUILD_ARGS   ?=
-CLUSTER_NAME        ?= $(PROJECT_NAME)-cluster
+CLUSTER_NAME        ?= devops-cluster
 INGRESS_NAME        ?= $(PROJECT_NAME)-ingress
-NAMESPACE           ?= $(CLUSTER_NAME)
+NAMESPACE           ?= $(PROJECT_NAME)-ns
 AGENTS              ?= 1
 IMAGE_PULL_POLICY   ?= IfNotPresent
 CLUSTER_TIMEOUT     ?= 300s
@@ -709,13 +709,17 @@ apply-pv: validate-project
 		if ! kubectl get nodes $(REDIRECT_OUTPUT); then \
 			echo "⚠️  No Kubernetes nodes found (cluster not ready). Skipping PV apply."; \
 		else \
-			NODE=$$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | grep agent); \
-			CONTAINER_ID=$$(docker ps -q --filter "name=$$NODE"); \
-			if [ -n "$$CONTAINER_ID" ]; then \
-				docker exec $$CONTAINER_ID mkdir -p /tmp/kube; \
+			NODE=$$(kubectl get nodes -o name | grep agent | head -1 | cut -d/ -f2); \
+			if [ -z "$$NODE" ]; then \
+				echo "⚠️ No agent node found. Skipping PV apply."; \
+			else \
+				CONTAINER_ID=$$(docker ps -q --filter name=$$NODE); \
+				if [ -n "$$CONTAINER_ID" ]; then \
+					docker exec $$CONTAINER_ID mkdir -p /tmp/kube; \
+				fi; \
+				sed "s/REPLACE_NODE_NAME/$$NODE/g" persistentvolume.yaml | kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
+				echo "✅ PersistentVolume applied successfully"; \
 			fi; \
-			sed "s/REPLACE_NODE_NAME/$$NODE/g" persistentvolume.yaml | kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
-			echo "✅ PersistentVolume applied successfully"; \
 		fi; \
 	else \
 		echo "ℹ️  No cluster-scoped persistentvolume.yaml found in repo root; skipping PV apply"; \

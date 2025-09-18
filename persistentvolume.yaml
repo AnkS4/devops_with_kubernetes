@@ -21,9 +21,9 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - k3d-log-output-cluster-agent-0
+          - REPLACE_NODE_NAME
   claimRef:
-    namespace: ping-pong-cluster
+    namespace: ping-pong-ns
     name: shared-storage-claim
 ---
 apiVersion: v1
@@ -49,7 +49,7 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - k3d-log-output-cluster-agent-0
+          - REPLACE_NODE_NAME
   claimRef:
-    namespace: log-output-cluster
+    namespace: log-output-ns
     name: shared-storage-claim
