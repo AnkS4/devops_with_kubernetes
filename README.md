@@ -17,7 +17,7 @@ This repository contains a collection of test applications for 'DevOps with Kube
 
 3. **Ping Pong Application**
    - A simple Python application that manages a counter
-   - Location: `/pingpong`
+   - Location: `/ping-pong`
    - Returns "pong count" with a counter that increments with each request
 
 ## System Requirements

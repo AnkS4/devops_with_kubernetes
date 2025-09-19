@@ -1,15 +1,7 @@
 # ============================================================================
 # PROJECT CONFIGURATION SECTION
 # ============================================================================
-# Define core project variables and environment defaults
-
-# ============================================================================
 # UNIVERSAL MAKEFILE FOR ALL PROJECTS (GENERIC/PARAMETERIZED)
-# ============================================================================
-# Usage for any project (override variables as needed):
-#   make build PROJECT_NAME=ping-pong MANIFEST_DIR=ping_pong/manifests DOCKERFILE=ping_pong/Dockerfile
-#   make deploy PROJECT_NAME=todo-app MANIFEST_DIR=project/manifests DOCKERFILE=project/Dockerfile
-# All variables can be overridden via command line or environment.
 # ============================================================================
 
 # Find all projects with Dockerfile and manifests directory
@@ -19,9 +11,9 @@ PROJECTS := $(shell \
   done | sort)
 
 # Default target to run
-TARGET ?= all
+TARGET ?= build
 
-.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy all status logs shell rebuild validate ingress watch debug health restart config print-projects deployment-exists cluster-exists apply-pv delete-pv clean-all multi
+.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy build-clean status logs shell build-image validate ingress watch debug health restart config print-projects deployment-exists cluster-exists apply-pv delete-pv clean-all multi-projects
 
 .DEFAULT_GOAL := default
 
@@ -41,14 +33,14 @@ help:
 	@echo "========================================="
 	@echo ""
 	@echo "🚀 Quick Start:"
-	@echo "  rebuild    Clean followed by full workflow (recommended) (validate → clean → build → cluster → deploy)"
-	@echo "  all        Full workflow (validate → build → cluster → deploy)"
+	@echo "  build-clean Clean followed by full workflow (validate → clean → build → cluster → deploy) (recommended for single project build)"
+	@echo "  build       Full workflow without cleaning existing cluster/resources (validate → build → cluster → deploy) (recommended for multiple project build)"
 	@echo ""
 	@echo "🔧 Build & Deploy:"
-	@echo "  build      Build Docker image"
-	@echo "  cluster    Create/start k3d cluster"
-	@echo "  deploy     Deploy application to cluster"
-	@echo "  clean      Remove all resources"
+	@echo "  build-image  Build project Docker image"
+	@echo "  cluster      Create/start k3d cluster"
+	@echo "  deploy       Deploy project to cluster"
+	@echo "  clean        Remove project cluster & resources"
 	@echo ""
 	@echo "📊 Monitor & Debug:"
 	@echo "  status     System status overview"
@@ -65,7 +57,7 @@ help:
 	@echo ""
 	@echo "📝 Project Management:"
 	@echo "  print-projects  List all available projects"
-	@echo "  all-projects   Run any TARGET (default: rebuild) for all projects"
+	@echo "  all-projects   Run any TARGET (default: build) for all projects"
 	@echo "    e.g. make all-projects TARGET=clean"
 	@echo "    e.g. make clean PROJECT_NAME=project"
 	@echo ""
@@ -78,18 +70,17 @@ help:
 	@echo "💡 Examples:"
 	@echo " ---Two methods to run make---"
 	@echo " Method 1: Choosing a specific project to run make"
-	@echo "   make rebuild PROJECT_NAME=ping-pong                                 # Build and deploy ping-pong project"
-	@echo "   make multi TARGET=rebuild PROJECT_NAME="ping-pong, log-output"      # Build and deploy ping-pong and log-output projects"
-	@echo "   make clean PROJECT_NAME=project                                     # Clean up a specific project"
-	@echo "   make delete-pv PROJECT_NAME=project                                 # Delete PersistentVolume for a specific project"
-	@echo "   make rebuild PROJECT_NAME=ping-pong AGENTS=2 DEBUG=1                 # Rebuild with debug output and two agents"
-	@echo "   make rebuild                                                        # Rebuild with default agent(s)"
+	@echo "   make build-clean PROJECT_NAME=ping-pong                                  # Build and deploy ping-pong project"
+	@echo "   make multi-projects TARGET=build PROJECT_NAME="ping-pong, log-output"    # Build and deploy ping-pong and log-output projects"
+	@echo "   make clean PROJECT_NAME=project                                          # Clean up a specific project"
+	@echo "   make delete-pv PROJECT_NAME=project                                      # Delete PersistentVolume for a specific project"
+	@echo "   make build-clean PROJECT_NAME=ping-pong AGENTS=2 DEBUG=1                 # Rebuild with debug output and two agents"
 	@echo ""
 	@echo " Method 2: Choosing all projects to run make"
-	@echo "   make all-projects TARGET=rebuild AGENTS=2                   # Fresh start with two agents for all projects"
-	@echo "   make all-projects TARGET=clean                              # Clean up all projects"
-	@echo "   make all-projects TARGET=rebuild AGENTS=2 DEBUG=1           # Rebuild all projects with debug output and two agents"
-	@echo "   make all-projects                                            # Rebuild all projects with default agent(s)"
+	@echo "   make all-projects TARGET=build AGENTS=2                                 # Fresh start with two agents for all projects"
+	@echo "   make all-projects TARGET=clean                                          # Clean up all projects"
+	@echo "   make all-projects TARGET=build AGENTS=2 DEBUG=1                         # Rebuild all projects with debug output and two agents"
+	@echo "   make all-projects                                                       # Rebuild all projects with default agent(s)"
 	@echo ""
 	@echo "🤔 Troubleshooting Tips:"
 	@echo "  Missing files? Check your project directory and ensure all required files are present."
@@ -208,7 +199,7 @@ deployment-exists: validate-project
 
 # Check if cluster exists and is running
 cluster-exists: validate-project
-	@if ! k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
+	@if ! k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
 		echo "❌ Cluster '$(CLUSTER_NAME)' not found"; \
 		exit 1; \
 	fi
@@ -218,10 +209,10 @@ cluster-exists: validate-project
 # ============================================================================
 
 # Remove all resources and rebuild from scratch
-rebuild: validate-project check-deps clean build cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
+build-clean: validate-project check-deps clean build-image cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
 
-# Full workflow: validate, build image, create cluster, apply pv, deploy and ingress
-all: validate-project check-deps build cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
+# Rebuild without cleaning existing cluster/resources
+build: validate-project check-deps build-image cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
 
 # Validate project and dependencies
 validate: validate-project check-deps
@@ -297,7 +288,7 @@ check-deps: validate-project
 		echo "❌ Dockerfile not found at '$(DOCKERFILE)'!"; exit 1; \
 	fi
 	@echo "🔍 Checking Dockerfile dependencies..."
-	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) $(REDIRECT_OUTPUT) | awk '{print $$2}' | grep -v '^http' | sort -u); do \
+	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) 2>/dev/null | awk '{print $$2}' | grep -v '^http' | sort -u); do \
 		if [ -f "$(DOCKERFILE_DIR)$$file" ] || [ -d "$(DOCKERFILE_DIR)$$file" ]; then \
 			if [ "$(DEBUG)" = "1" ]; then \
 				echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
@@ -339,7 +330,7 @@ clean: validate-project
 	@echo "✅ Cleanup complete for project '$(PROJECT_NAME)'!"
 
 # Build the Docker images for the application
-build: validate-project
+build-image: validate-project
 	@echo "📦 Building application Docker image(s)..."
 	@if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
@@ -381,7 +372,7 @@ build: validate-project
 # Create or start the k3d cluster and import required images
 cluster-create: validate-project
 	@echo "🔧 Setting up cluster '$(CLUSTER_NAME)'..."
-	@if k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
+	@if k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
 		echo "✅ Cluster '$(CLUSTER_NAME)' exists"; \
 		if [ "$(DEBUG)" = "1" ]; then \
 			echo "🔧 Starting cluster if stopped..."; \
@@ -557,8 +548,8 @@ status: validate-project
 		echo ""; \
 	fi
 	@echo "📊 Cluster Status:"
-	@if k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep -q "^$(CLUSTER_NAME)"; then \
-		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) $(REDIRECT_OUTPUT) | grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
+	@if k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
+		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
 		echo "✅ Cluster '$(CLUSTER_NAME)' - Status: $$STATUS"; \
 		if [ "$(DEBUG)" = "1" ]; then \
 			k3d cluster list | grep -E "(NAME|$(CLUSTER_NAME))"; \
@@ -681,11 +672,11 @@ debug: validate-project
 	@docker images | grep "$(IMAGE_NAME)" || echo "❌ No matching images found for '$(IMAGE_NAME)'"
 	@echo ""
 	@echo "k3d Clusters:"
-	@clusters=$$(k3d cluster list $(REDIRECT_OUTPUT) | tail -n +2); \
+	@clusters=$$(k3d cluster list 2>/dev/null | tail -n +2); \
 	if [ -z "$$clusters" ]; then \
 		echo "❌ No clusters found"; \
 	else \
-		k3d cluster list $(REDIRECT_OUTPUT); \
+		k3d cluster list 2>/dev/null; \
 	fi
 	@echo ""
 	@echo "Deployments in namespace '$(NAMESPACE)':"
@@ -745,8 +736,8 @@ delete-pv:
 	fi
 
 # Run TARGET for a comma-separated list in PROJECT_NAME (e.g., "ping-pong, log-output")
-multi:
+multi-projects:
 	@for p in $(shell echo $(PROJECT_NAME) | tr ',' ' ' | xargs); do \
-		echo "==== Running '$(TARGET)' for $$p ===="; \
-		$(MAKE) $(TARGET) PROJECT_NAME=$$p; \
+		echo "==== Running build for $$p ===="; \
+		$(MAKE) build PROJECT_NAME=$$p; \
 	done
