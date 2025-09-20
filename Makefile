@@ -4,37 +4,142 @@
 # UNIVERSAL MAKEFILE FOR ALL PROJECTS (GENERIC/PARAMETERIZED)
 # ============================================================================
 
-# Find all projects with Dockerfile and manifests directory
+# Find all projects in the repository by finding directories with Dockerfile and manifests
 PROJECTS := $(shell \
   for d in */ ; do \
     [ -f "$${d}Dockerfile" ] && [ -d "$${d}manifests" ] && echo $${d%/}; \
   done | sort)
 
-# Default target to run
+# Set default target to run when no target is specified
 TARGET ?= build
 
-.PHONY: default help all-projects list-projects validate-project clean build cluster-create preload-critical-images preload-app-images deploy build-clean status logs shell build-image validate ingress watch debug health restart config print-projects deployment-exists cluster-exists apply-pv delete-pv clean-all multi-projects
+# ============================================================================
+# SPECIAL MAKE DIRECTIVES
+# ============================================================================
+# Declare phony targets (not real files) to ensure they always run
+.PHONY: default help all-projects list-projects validate-project clean \
+        build cluster-create preload-critical-images preload-app-images \
+        deploy build-clean status logs shell build-image validate ingress \
+        watch debug health restart config print-projects deployment-exists \
+        apply-pv delete-pv clean-all multi-projects check-deps preload-images
 
+# Set the default goal when make is run without arguments
 .DEFAULT_GOAL := default
 
+# Project Variables (override as needed)
+PROJECT_NAME        ?= project
+MANIFEST_DIR        ?= $(PROJECT_NAME)/manifests
+IMAGE_NAME          ?= $(PROJECT_NAME)-app
+IMAGE_TAG           ?= latest
+DOCKERFILE          ?= $(PROJECT_NAME)/Dockerfile
+DOCKERFILE_DIR      := $(dir $(DOCKERFILE))
+DOCKER_BUILD_ARGS   ?=
+CLUSTER_NAME        ?= devops-cluster
+INGRESS_NAME        ?= $(PROJECT_NAME)-ingress
+NAMESPACE           ?= $(PROJECT_NAME)-ns
+AGENTS              ?= 1
+IMAGE_PULL_POLICY   ?= IfNotPresent
+CLUSTER_TIMEOUT     ?= 300s
+POD_READY_TIMEOUT   ?= 30
+RESTART_POLICY      ?= Never
+DEBUG               ?= 0
+K3D_RESOLV_FILE     ?= k3s-resolv.conf
+K3D_FIX_DNS         ?= 0
+PORT_MIN            ?= 8000
+PORT_MAX            ?= 8099
+PORT_HOST           ?= 127.0.0.1
+INGRESS_RETRIES     ?= 10
+INGRESS_WAIT_SECONDS ?= 5
+
+# Function to find an available port starting from a base port
+define find_available_port
+$(shell \
+  base=$(1); \
+  min=$(PORT_MIN); max=$(PORT_MAX); host=$(PORT_HOST); \
+  # clamp start to [min, max]
+  if [ -z "$$base" ]; then base=$$min; fi; \
+  if [ $$base -lt $$min ]; then start=$$min; else start=$$base; fi; \
+  if [ $$start -gt $$max ]; then exit 0; fi; \
+  port=$$start; \
+  while [ $$port -le $$max ]; do \
+    if command -v ss >/dev/null 2>&1; then \
+      # ss prints nothing when no socket matches; grep -q . means "used"
+      if ss -Hln "sport = :$$port" 2>/dev/null | grep -q .; then \
+        :; \
+      else \
+        echo $$port; exit 0; \
+      fi; \
+    elif command -v lsof >/dev/null 2>&1; then \
+      if lsof -PiTCP:$$port -sTCP:LISTEN -n 2>/dev/null | grep -q .; then \
+        :; \
+      else \
+        echo $$port; exit 0; \
+      fi; \
+    else \
+      # /dev/tcp returns success when something is listening (port used)
+      (echo > /dev/tcp/$$host/$$port) >/dev/null 2>&1 && used=1 || used=0; \
+      if [ $$used -eq 0 ]; then echo $$port; exit 0; fi; \
+    fi; \
+    port=$$((port + 1)); \
+  done \
+)
+endef
+
+# ============================================================================
+# DERIVED VARIABLES (DO NOT MODIFY BELOW)
+# ============================================================================
+# These are computed based on the above configuration
+
+# Dynamic port assignments
+TRAEFIK_HTTP_PORT  ?= $(call find_available_port,8080)
+TRAEFIK_HTTPS_PORT ?= $(call find_available_port,8443)
+
+# TRAEFIK_HTTP_PORT  ?= 8080
+# TRAEFIK_HTTPS_PORT ?= 8443
+
+# Automatically detect build context based on Dockerfile location
+BUILD_CONTEXT ?= $(DOCKERFILE_DIR)
+
+# Set debug/verbosity flags for tools based on DEBUG
+ifeq ($(DEBUG),1)
+	KUBECTL_VERBOSITY := --v=6
+	DOCKER_BUILD_FLAGS := --progress=plain
+	K3D_VERBOSITY :=
+	REDIRECT_OUTPUT :=
+	NO_HEADERS_FLAG :=
+else
+	KUBECTL_VERBOSITY :=
+	DOCKER_BUILD_FLAGS := --quiet
+	K3D_VERBOSITY := --quiet
+	REDIRECT_OUTPUT := >/dev/null 2>&1
+	NO_HEADERS_FLAG := --no-headers
+endif
+
+# ============================================================================
+# MAIN WORKFLOW TARGETS
+# ============================================================================
+
+# Rebuild without cleaning existing cluster/resources
+build: validate-project build-image cluster-create preload-images apply-pv deploy ingress
+
+# Remove all resources and rebuild from scratch
+build-clean: validate-project clean build-image cluster-create preload-images apply-pv deploy ingress
+
+# ============================================================================
+# HELPER TARGETS
+# ============================================================================
+
+# Display comprehensive help information with usage examples and variable descriptions
 default: help
 
-list-projects:
-	@echo "Available projects: $(PROJECTS)"
-
-all-projects:
-	@for proj in $(PROJECTS); do \
-		echo "==== Running '$(TARGET)' for $$proj ===="; \
-		$(MAKE) $(TARGET) PROJECT_NAME=$$proj; \
-	done
-
+# Display comprehensive help information with usage examples and variable descriptions
 help:
 	@echo "📘 Kubernetes Local Development Makefile"
 	@echo "========================================="
 	@echo ""
 	@echo "🚀 Quick Start:"
-	@echo "  build-clean Clean followed by full workflow (validate → clean → build → cluster → deploy) (recommended for single project build)"
-	@echo "  build       Full workflow without cleaning existing cluster/resources (validate → build → cluster → deploy) (recommended for multiple project build)"
+	@echo "  build-clean Clean followed by full workflow (Recommended for single project)"
+	@echo "  build       Full workflow without cleaning cluster/resources (Recommended for multiple projects)"
 	@echo ""
 	@echo "🔧 Build & Deploy:"
 	@echo "  build-image  Build project Docker image"
@@ -88,136 +193,11 @@ help:
 	@echo "  Use 'make validate PROJECT_NAME=your-project' to check dependencies."
 	@echo ""
 
-# Project Variables (override as needed)
-PROJECT_NAME        ?= project
-MANIFEST_DIR        ?= $(PROJECT_NAME)/manifests
-IMAGE_NAME          ?= $(PROJECT_NAME)-app
-IMAGE_TAG           ?= latest
-DOCKERFILE          ?= $(PROJECT_NAME)/Dockerfile
-DOCKERFILE_DIR      := $(dir $(DOCKERFILE))
-DOCKER_BUILD_ARGS   ?=
-CLUSTER_NAME        ?= devops-cluster
-INGRESS_NAME        ?= $(PROJECT_NAME)-ingress
-NAMESPACE           ?= $(PROJECT_NAME)-ns
-AGENTS              ?= 1
-IMAGE_PULL_POLICY   ?= IfNotPresent
-CLUSTER_TIMEOUT     ?= 300s
-POD_READY_TIMEOUT   ?= 30
-LOG_TAIL_LINES      ?= 50
-RESTART_POLICY      ?= Never
-DEBUG               ?= 0
-K3D_RESOLV_FILE     ?= k3s-resolv.conf
-K3D_FIX_DNS         ?= 0
-PORT_MIN            ?= 8000
-PORT_MAX            ?= 8099
-PORT_HOST           ?= 127.0.0.1
-INGRESS_RETRIES     ?= 10
-INGRESS_WAIT_SECONDS ?= 5
+# List all available projects discovered in the repository
+list-projects:
+	@echo "Available projects: $(PROJECTS)"
 
-# Function to find an available port starting from a base port
-define find_available_port
-$(shell \
-  base=$(1); \
-  min=$(PORT_MIN); max=$(PORT_MAX); host=$(PORT_HOST); \
-  # clamp start to [min, max]
-  if [ -z "$$base" ]; then base=$$min; fi; \
-  if [ $$base -lt $$min ]; then start=$$min; else start=$$base; fi; \
-  if [ $$start -gt $$max ]; then exit 0; fi; \
-  port=$$start; \
-  while [ $$port -le $$max ]; do \
-    if command -v ss >/dev/null 2>&1; then \
-      # ss prints nothing when no socket matches; grep -q . means "used"
-      if ss -Hln "sport = :$$port" 2>/dev/null | grep -q .; then \
-        :; \
-      else \
-        echo $$port; exit 0; \
-      fi; \
-    elif command -v lsof >/dev/null 2>&1; then \
-      if lsof -PiTCP:$$port -sTCP:LISTEN -n 2>/dev/null | grep -q .; then \
-        :; \
-      else \
-        echo $$port; exit 0; \
-      fi; \
-    else \
-      # /dev/tcp returns success when something is listening (port used)
-      (echo > /dev/tcp/$$host/$$port) >/dev/null 2>&1 && used=1 || used=0; \
-      if [ $$used -eq 0 ]; then echo $$port; exit 0; fi; \
-    fi; \
-    port=$$((port + 1)); \
-  done \
-)
-endef
-
-# Dynamic port assignments
-TRAEFIK_HTTP_PORT  ?= $(call find_available_port,8080)
-TRAEFIK_HTTPS_PORT ?= $(call find_available_port,8443)
-
-# TRAEFIK_HTTP_PORT  ?= 8080
-# TRAEFIK_HTTPS_PORT ?= 8443
-
-# ============================================================================
-# DERIVED VARIABLES (DO NOT MODIFY BELOW)
-# ============================================================================
-# These are computed based on the above configuration
-
-# Automatically detect build context based on Dockerfile location
-BUILD_CONTEXT ?= $(DOCKERFILE_DIR)
-
-# Set debug/verbosity flags for tools based on DEBUG
-ifeq ($(DEBUG),1)
-	KUBECTL_VERBOSITY := --v=6
-	DOCKER_BUILD_FLAGS := --progress=plain
-	K3D_VERBOSITY :=
-	REDIRECT_OUTPUT :=
-	NO_HEADERS_FLAG :=
-else
-	KUBECTL_VERBOSITY :=
-	DOCKER_BUILD_FLAGS := --quiet
-	K3D_VERBOSITY := --quiet
-	REDIRECT_OUTPUT := >/dev/null 2>&1
-	NO_HEADERS_FLAG := --no-headers
-endif
-
-# ============================================================================
-# VALIDATION TARGETS
-# ============================================================================
-
-# Validate that PROJECT_NAME is set and not empty
-validate-project:
-	@if [ -z "$(PROJECT_NAME)" ]; then \
-		echo "❌ PROJECT_NAME is required!"; \
-		echo "Available projects: $(PROJECTS)"; \
-		exit 1; \
-	fi
-
-# Check if deployment exists
-deployment-exists: validate-project
-	@if ! kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT); then \
-		echo "❌ Deployment '$(PROJECT_NAME)-deployment' not found in namespace '$(NAMESPACE)'"; \
-		exit 1; \
-	fi
-
-# Check if cluster exists and is running
-cluster-exists: validate-project
-	@if ! k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
-		echo "❌ Cluster '$(CLUSTER_NAME)' not found"; \
-		exit 1; \
-	fi
-
-# ============================================================================
-# MAIN MAKE TARGETS
-# ============================================================================
-
-# Remove all resources and rebuild from scratch
-build-clean: validate-project check-deps clean build-image cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
-
-# Rebuild without cleaning existing cluster/resources
-build: validate-project check-deps build-image cluster-create preload-critical-images preload-app-images apply-pv deploy ingress
-
-# Validate project and dependencies
-validate: validate-project check-deps
-
-# Print current configuration and environment variables
+# Display current configuration and environment variables for the specified project
 config: validate-project
 	@echo "📋 Current Configuration"
 	@echo "========================"
@@ -242,6 +222,27 @@ config: validate-project
 	@echo "  RESTART_POLICY: $(RESTART_POLICY)"
 	@echo "  POD_READY_TIMEOUT: $(POD_READY_TIMEOUT)s"
 	@echo "  DEBUG: $(DEBUG)"
+
+# Validate project and dependencies
+validate: validate-project check-deps
+
+# Preload critical images
+preload-images: preload-critical-images preload-app-images
+
+# Validate that PROJECT_NAME is set and not empty
+validate-project:
+	@if [ -z "$(PROJECT_NAME)" ]; then \
+		echo "❌ PROJECT_NAME is required!"; \
+		echo "Available projects: $(PROJECTS)"; \
+		exit 1; \
+	fi
+
+# Check if deployment exists
+deployment-exists: validate-project
+	@if ! kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE); then \
+		echo "❌ Deployment '$(PROJECT_NAME)-deployment' not found in namespace '$(NAMESPACE)'"; \
+		exit 1; \
+	fi
 
 # Print all projects
 print-projects:
@@ -288,7 +289,12 @@ check-deps: validate-project
 		echo "❌ Dockerfile not found at '$(DOCKERFILE)'!"; exit 1; \
 	fi
 	@echo "🔍 Checking Dockerfile dependencies..."
-	@for file in $$(grep -E '^(COPY|ADD)' $(DOCKERFILE) 2>/dev/null | awk '{print $$2}' | grep -v '^http' | sort -u); do \
+	@for file in $$( \
+		grep -E '^(COPY|ADD)' $(DOCKERFILE) 2>/dev/null | \
+		awk '{print $$2}' | \
+		grep -v '^http' | \
+		sort -u \
+	); do \
 		if [ -f "$(DOCKERFILE_DIR)$$file" ] || [ -d "$(DOCKERFILE_DIR)$$file" ]; then \
 			if [ "$(DEBUG)" = "1" ]; then \
 				echo "✅ Found: $(DOCKERFILE_DIR)$$file"; \
@@ -300,36 +306,11 @@ check-deps: validate-project
 	done
 	@echo "✅ All dependencies verified for project '$(PROJECT_NAME)'"
 
-# Remove all created resources: deployment, cluster, and Docker image
-clean: validate-project
-	@echo "🧹 Cleaning resources for project '$(PROJECT_NAME)'..."
-	@if [ "$(DEBUG)" = "1" ]; then \
-		echo "🗑️ Deleting deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'..."; \
-		if kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true $(REDIRECT_OUTPUT); then \
-			echo "✅ Deployment deleted"; \
-		else \
-			echo "⚠️ Deployment not found or already deleted"; \
-		fi; \
-		echo "🗑️ Deleting cluster '$(CLUSTER_NAME)'..."; \
-		if k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-			echo "✅ Cluster deleted"; \
-		else \
-			echo "⚠️ Cluster not found or already deleted"; \
-		fi; \
-		echo "🗑️ Removing Docker image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
-			echo "✅ Image deleted"; \
-		else \
-			echo "⚠️ Image not found or already deleted"; \
-		fi; \
-	else \
-		kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --ignore-not-found=true --wait=true $(REDIRECT_OUTPUT) || true; \
-		k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
-		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT) || true; \
-	fi
-	@echo "✅ Cleanup complete for project '$(PROJECT_NAME)'!"
+# ============================================================================
+# BUILD AND INFRASTRUCTURE TARGETS
+# ============================================================================
 
-# Build the Docker images for the application
+# Build Docker images for the application, handling multi-stage builds for complex projects
 build-image: validate-project
 	@echo "📦 Building application Docker image(s)..."
 	@if [ "$(PROJECT_NAME)" = "log-output" ]; then \
@@ -348,13 +329,20 @@ build-image: validate-project
 			else \
 				TARGET="status"; \
 			fi; \
-			if DOCKER_BUILDKIT=1 docker build -t "$$image" --target="$$TARGET" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
+			if [ "$(DEBUG)" = "1" ]; then \
+				echo "Building $$image"; \
+			fi; \
+			if DOCKER_BUILDKIT=1 \
+				docker build -t "$$image" --target="$$TARGET" \
+				$(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) \
+				$(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) \
+				$(REDIRECT_OUTPUT); then \
 				echo "✅ $$image built successfully"; \
 			else \
 				echo "❌ $$image build failed"; exit 1; \
 			fi; \
 		done; \
-	echo "✅ All images built successfully"; \
+		echo "✅ All images built successfully"; \
 	else \
 		if [ "$(DEBUG)" = "1" ]; then \
 			echo "  Project: $(PROJECT_NAME)"; \
@@ -362,14 +350,18 @@ build-image: validate-project
 			echo "  Dockerfile: $(DOCKERFILE)"; \
 			echo "  Build context: $(BUILD_CONTEXT)"; \
 		fi; \
-		if DOCKER_BUILDKIT=1 docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" $(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) $(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) $(REDIRECT_OUTPUT); then \
+		if DOCKER_BUILDKIT=1 \
+			docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" \
+			$(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) \
+			$(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) \
+			$(REDIRECT_OUTPUT); then \
 			echo "✅ $(IMAGE_NAME):$(IMAGE_TAG) built successfully"; \
 		else \
 			echo "❌ $(IMAGE_NAME):$(IMAGE_TAG) build failed"; exit 1; \
 		fi; \
 	fi
 
-# Create or start the k3d cluster and import required images
+# Set up k3d cluster with specified agents and port mappings
 cluster-create: validate-project
 	@echo "🔧 Setting up cluster '$(CLUSTER_NAME)'..."
 	@if k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
@@ -392,7 +384,7 @@ cluster-create: validate-project
 		fi; \
 	fi
 
-# Preload critical cluster images
+# Import essential Kubernetes system images into the cluster
 preload-critical-images: cluster-create
 	@echo "📥 Preloading critical cluster images..."; \
 	for img in \
@@ -416,7 +408,7 @@ preload-critical-images: cluster-create
 	done; \
 	echo "✅ Successfully imported all critical cluster images"; \
 
-# Preload application images
+# Import application-specific Docker images into the cluster
 preload-app-images: validate-project cluster-create
 	@echo "📥 Preloading application images..."; \
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then \
@@ -447,10 +439,40 @@ preload-app-images: validate-project cluster-create
 			fi; \
 			echo "✅ Successfully imported all application images"; \
 		else \
-			echo "⚠️  Skipping import: local image '$(IMAGE_NAME):$(IMAGE_TAG)' not found. Run 'make build' first."; \
+			echo "⚠️  Skipping import: local image '$(IMAGE_NAME):$(IMAGE_TAG)' not found."; \
+			echo "Run 'make build' first."; \
 		fi; \
 	fi
 
+# ============================================================================
+# DEPLOYMENT TARGETS
+# ============================================================================
+
+# Apply persistent volume
+apply-pv: validate-project
+	@echo "💾 Applying PersistentVolume configuration for project '$(PROJECT_NAME)'..."
+	@if [ -f "persistentvolume.yaml" ]; then \
+		if ! kubectl get nodes $(REDIRECT_OUTPUT); then \
+			echo "⚠️  No Kubernetes nodes found (cluster not ready). Skipping PV apply."; \
+		else \
+			NODE=$$(kubectl get nodes -o name | grep agent | head -1 | cut -d/ -f2); \
+			if [ -z "$$NODE" ]; then \
+				echo "⚠️ No agent node found. Skipping PV apply."; \
+			else \
+				CONTAINER_ID=$$(docker ps -q --filter name=$$NODE); \
+				if [ -n "$$CONTAINER_ID" ]; then \
+					docker exec $$CONTAINER_ID mkdir -p /tmp/kube; \
+				fi; \
+				sed "s/REPLACE_NODE_NAME/$$NODE/g" persistentvolume.yaml | \
+					kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
+				echo "✅ PersistentVolume applied successfully"; \
+			fi; \
+		fi; \
+	else \
+		echo "ℹ️  No cluster-scoped persistentvolume.yaml found in repo root; skipping PV apply"; \
+	fi
+
+# Apply Kubernetes manifests and wait for deployment rollout
 deploy: validate-project
 	@echo "🚀 Deploying application '$(PROJECT_NAME)'..."
 	@if [ "$(DEBUG)" = "1" ]; then \
@@ -459,7 +481,7 @@ deploy: validate-project
 		if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 			echo " Images: log-output-generator:latest, log-output-status:latest"; \
 		else \
-		echo " Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
+			echo " Image: $(IMAGE_NAME):$(IMAGE_TAG)"; \
 		fi; \
 		echo " Image Pull Policy: $(IMAGE_PULL_POLICY)"; \
 		echo "🔍 Verifying cluster connection..."; \
@@ -478,16 +500,24 @@ deploy: validate-project
 		echo "✅ Namespace '$(NAMESPACE)' already exists."; \
 	fi
 	@echo "📝 Applying manifests from $(MANIFEST_DIR)..."
-	@if [ ! -d "$(MANIFEST_DIR)" ]; then echo "❌ No manifest directory: $(MANIFEST_DIR)"; exit 1; fi
-	@if ! ls $(MANIFEST_DIR)/*.yaml $(REDIRECT_OUTPUT); then echo "❌ No *.yaml files in $(MANIFEST_DIR)"; exit 1; fi
-	@kubectl apply -f $(MANIFEST_DIR) -n $(NAMESPACE) $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || (echo "❌ Failed to apply manifests"; exit 1)
+	@if [ ! -d "$(MANIFEST_DIR)" ]; then \
+		echo "❌ No manifest directory: $(MANIFEST_DIR)"; exit 1; \
+	fi
+	@if ! ls $(MANIFEST_DIR)/*.yaml $(REDIRECT_OUTPUT); then \
+		echo "❌ No *.yaml files in $(MANIFEST_DIR)"; exit 1; \
+	fi
+	@kubectl apply -f $(MANIFEST_DIR) -n $(NAMESPACE) \
+		$(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || \
+		(echo "❌ Failed to apply manifests"; exit 1)
 	@echo "✅ Applied all manifests successfully!"
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
-	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
-	(echo "⚠️ Timeout reached. Check: 'make logs PROJECT_NAME=$(PROJECT_NAME)' or 'make status PROJECT_NAME=$(PROJECT_NAME)'"; exit 1)
+	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment \
+		-n $(NAMESPACE) --timeout=$(POD_READY_TIMEOUT)s || \
+		(echo "⚠️ Timeout reached. Check: 'make logs PROJECT_NAME=$(PROJECT_NAME)' or"; \
+		 echo "'make status PROJECT_NAME=$(PROJECT_NAME)'"; exit 1)
 	@echo "✅ Deployment complete!"
 
-# Check Ingress endpoint
+# Verify Ingress configuration and provide access URLs
 ingress: validate-project
 	@set -e; \
 	echo "🌐 Checking Ingress endpoint..."; \
@@ -499,15 +529,20 @@ ingress: validate-project
 	# Early guard: fail fast if Ingress object is missing; \
 	if ! kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) $(REDIRECT_OUTPUT); then \
 		echo "❌ Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'."; \
-		echo "   Ensure your manifests create it (e.g., $(MANIFEST_DIR)/ingress.yaml or kustomization)."; \
+		echo " Ensure your manifests create it (e.g., $(MANIFEST_DIR)/ingress.yaml or kustomization)."; \
 		exit 1; \
 	fi; \
-	HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
-	EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
-	EXTERNAL_HOSTNAME=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
-	EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
+	HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) \
+		-o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
+	EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system \
+		-o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
+	EXTERNAL_HOSTNAME=$$(kubectl get svc traefik -n kube-system \
+		-o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
+	EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system \
+		-o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
 	for i in $$(seq 1 $(INGRESS_RETRIES)); do \
-		if [ -n "$$HOST" ] && { [ -n "$$EXTERNAL_IP" ] || [ -n "$$EXTERNAL_HOSTNAME" ]; }; then \
+		if [ -n "$$HOST" ] && \
+			{ [ -n "$$EXTERNAL_IP" ] || [ -n "$$EXTERNAL_HOSTNAME" ]; }; then \
 			break; \
 		fi; \
 		if [ "$(DEBUG)" = "1" ]; then \
@@ -515,14 +550,19 @@ ingress: validate-project
 		fi; \
 		echo "Waiting for external IP and host to be assigned... (attempt $$i/$(INGRESS_RETRIES))"; \
 		sleep $(INGRESS_WAIT_SECONDS); \
-		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
-		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
-		EXTERNAL_HOSTNAME=$$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
-		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system -o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
+		HOST=$$(kubectl get ing/$(INGRESS_NAME) -n $(NAMESPACE) \
+			-o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo ""); \
+		EXTERNAL_IP=$$(kubectl get svc traefik -n kube-system \
+			-o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
+		EXTERNAL_HOSTNAME=$$(kubectl get svc traefik -n kube-system \
+			-o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
+		EXTERNAL_PORT=$$(kubectl get svc traefik -n kube-system \
+			-o jsonpath="{.spec.ports[?(@.name=='web')].port}" 2>/dev/null || echo "80"); \
 	done; \
 	if [ -z "$$HOST" ]; then \
 		echo "❌ Ingress host not found. Checking ingress status:"; \
-		kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) 2>/dev/null || echo "Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'"; \
+		kubectl get ingress $(INGRESS_NAME) -n $(NAMESPACE) 2>/dev/null || \
+			echo "Ingress '$(INGRESS_NAME)' not found in namespace '$(NAMESPACE)'"; \
 		exit 1; \
 	fi; \
 	# Fallback to localhost if EXTERNAL_IP/hostname not present (typical with k3d + klipper-lb); \
@@ -538,7 +578,17 @@ ingress: validate-project
 	echo "  http://$$HOST$$PATH_SUFFIX by adding '$$EXTERNAL_IP $$HOST' to /etc/hosts"; \
 	echo "  OR by: curl -H \"Host: $$HOST\" http://$$EXTERNAL_IP:$$EXTERNAL_PORT$$PATH_SUFFIX"
 
-# Show status of Docker, cluster, and deployment (with debug info if enabled)
+# Trigger a rollout restart of the deployment
+restart: validate-project deployment-exists
+	@echo "🔄 Restarting deployment '$(PROJECT_NAME)-deployment'..."
+	@kubectl rollout restart deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE)
+	@echo "✅ Restart initiated. Check status with: make status PROJECT_NAME=$(PROJECT_NAME)"
+
+# ============================================================================
+# MONITORING AND DEBUGGING TARGETS
+# ============================================================================
+
+# Provide comprehensive system status overview for Docker, cluster, and deployment
 status: validate-project
 	@echo "📊 System Status for Project '$(PROJECT_NAME)'"
 	@echo "============================================="
@@ -549,7 +599,8 @@ status: validate-project
 	fi
 	@echo "📊 Cluster Status:"
 	@if k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep -q "^$(CLUSTER_NAME)"; then \
-		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
+		STATUS=$$(k3d cluster list $(NO_HEADERS_FLAG) 2>/dev/null | \
+			grep "^$(CLUSTER_NAME)" | awk '{print $$2}'); \
 		echo "✅ Cluster '$(CLUSTER_NAME)' - Status: $$STATUS"; \
 		if [ "$(DEBUG)" = "1" ]; then \
 			k3d cluster list | grep -E "(NAME|$(CLUSTER_NAME))"; \
@@ -559,7 +610,8 @@ status: validate-project
 	fi
 	@echo ""
 	@echo "📊 Deployment Status:"
-	@if kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) 2>&1; then \
+	@if kubectl get deployment $(PROJECT_NAME)-deployment \
+		-n $(NAMESPACE) $(REDIRECT_OUTPUT) 2>&1; then \
 		echo "✅ Deployment '$(PROJECT_NAME)-deployment' found in namespace '$(NAMESPACE)'"; \
 		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE); \
 		echo ""; \
@@ -578,11 +630,11 @@ status: validate-project
 		echo "❌ Cannot connect to cluster"; \
 	fi
 
-# Stream pod logs with user-friendly error handling
+# Stream live pod logs for the deployment
 logs: validate-project
-	@echo "📜 Streaming logs for deployment '$(PROJECT_NAME)-deployment' (last $(LOG_TAIL_LINES) lines)"
+	@echo "📜 Streaming logs for deployment '$(PROJECT_NAME)-deployment'"
 	@echo "  Press Ctrl+C to exit..."
-	@kubectl logs deployment/$(PROJECT_NAME)-deployment -f --tail=$(LOG_TAIL_LINES) -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
+	@kubectl logs deployment/$(PROJECT_NAME)-deployment -f -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
 		(EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 130 ]; then \
 			echo "✅ Log streaming stopped by user"; \
@@ -592,7 +644,7 @@ logs: validate-project
 				echo "❌ Deployment '$(PROJECT_NAME)-deployment' not found in namespace '$(NAMESPACE)'"; \
 		fi)
 
-# Continuously watch pod status in the namespace
+# Continuously monitor pod status with live updates
 watch: validate-project
 	@echo "👀 Watching pod status for project '$(PROJECT_NAME)' in namespace '$(NAMESPACE)'"
 	@echo "  Press Ctrl+C to exit..."
@@ -607,17 +659,19 @@ watch: validate-project
 		echo "❌ Namespace '$(NAMESPACE)' not found!"; \
 	fi
 
-# Open an interactive shell in the running pod, fallback to /bin/bash if sh is unavailable
+# Open an interactive shell in a running pod (prefers /bin/sh, falls back to /bin/bash)
 shell: validate-project deployment-exists
 	@echo "🔓 Starting shell session in deployment '$(PROJECT_NAME)-deployment'..."
-	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' $(REDIRECT_OUTPUT)); \
+	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) \
+		-o jsonpath='{.items[0].metadata.name}' $(REDIRECT_OUTPUT)); \
 	if [ -n "$$POD_NAME" ]; then \
 		echo "🔓 Connecting to pod: $$POD_NAME"; \
 		if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- sh $(REDIRECT_OUTPUT); then \
 			: ; \
 		else \
 			echo "⚠️ Shell '/bin/sh' failed - trying '/bin/bash'..."; \
-			if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- /bin/bash $(REDIRECT_OUTPUT); then \
+			if kubectl exec -it $$POD_NAME -n $(NAMESPACE) -- \
+				/bin/bash $(REDIRECT_OUTPUT); then \
 				: ; \
 			else \
 				echo "❌ No shell available - pod may not be running or ready"; \
@@ -626,35 +680,33 @@ shell: validate-project deployment-exists
 		fi; \
 	else \
 		echo "❌ No pods found for deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'"; \
-		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
+		kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) \
+			$(REDIRECT_OUTPUT) || \
 			echo "❌ Deployment not found"; \
 	fi
 
-# Check pod health status
+# Check the health status of pods in the deployment
 health: validate-project deployment-exists
 	@echo "🏥 Health check for project '$(PROJECT_NAME)'"
 	@echo "============================================="
-	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}' $(REDIRECT_OUTPUT)); \
+	@POD_NAME=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) \
+		-o jsonpath='{.items[0].metadata.name}'); \
 	if [ -n "$$POD_NAME" ]; then \
 		echo "Pod: $$POD_NAME"; \
-		READY=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o jsonpath='{.items[0].status.containerStatuses[0].ready}' $(REDIRECT_OUTPUT)); \
+		READY=$$(kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) \
+			-o jsonpath='{.items[0].status.containerStatuses[0].ready}'); \
 		if [ "$$READY" = "true" ]; then \
 			echo "✅ Pod is ready and healthy"; \
 		else \
 			echo "⚠️ Pod is not ready"; \
-			kubectl describe pod $$POD_NAME -n $(NAMESPACE) | grep -A 5 "Conditions:"; \
+			kubectl describe pod $$POD_NAME -n $(NAMESPACE) | \
+				grep -A 5 "Conditions:"; \
 		fi; \
 	else \
 		echo "❌ No pods found for deployment '$(PROJECT_NAME)-deployment'"; \
 	fi
 
-# Restart the deployment
-restart: validate-project deployment-exists
-	@echo "🔄 Restarting deployment '$(PROJECT_NAME)-deployment'..."
-	@kubectl rollout restart deployment/$(PROJECT_NAME)-deployment -n $(NAMESPACE)
-	@echo "✅ Restart initiated. Check status with: make status PROJECT_NAME=$(PROJECT_NAME)"
-
-# Print debug information about images, clusters, and pods
+# Display detailed debug information about images, clusters, and pods
 debug: validate-project
 	@echo "🔍 Debug Information for Project '$(PROJECT_NAME)'"
 	@echo "================================================="
@@ -669,7 +721,8 @@ debug: validate-project
 	@echo "  BUILD_CONTEXT: $(BUILD_CONTEXT)"
 	@echo ""
 	@echo "Docker Images:"
-	@docker images | grep "$(IMAGE_NAME)" || echo "❌ No matching images found for '$(IMAGE_NAME)'"
+	@docker images | grep "$(IMAGE_NAME)" || \
+		echo "❌ No matching images found for '$(IMAGE_NAME)'"
 	@echo ""
 	@echo "k3d Clusters:"
 	@clusters=$$(k3d cluster list 2>/dev/null | tail -n +2); \
@@ -680,62 +733,97 @@ debug: validate-project
 	fi
 	@echo ""
 	@echo "Deployments in namespace '$(NAMESPACE)':"
-	@kubectl get deployments -n $(NAMESPACE) $(REDIRECT_OUTPUT) || echo "❌ Cannot connect to cluster"
+	@kubectl get deployments -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
+		echo "❌ Cannot connect to cluster"
 	@echo ""
 	@echo "All Pods in namespace '$(NAMESPACE)':"
-	@kubectl get pods -n $(NAMESPACE) $(REDIRECT_OUTPUT) || echo "❌ Cannot connect to cluster"
+	@kubectl get pods -n $(NAMESPACE) $(REDIRECT_OUTPUT) || \
+		echo "❌ Cannot connect to cluster"
 	@if [ "$(DEBUG)" = "1" ]; then \
 		echo ""; \
 		echo "Detailed Pod Information:"; \
-		kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) -o wide $(REDIRECT_OUTPUT) || echo "❌ No pods found"; \
+		kubectl get pods -l app=$(PROJECT_NAME) -n $(NAMESPACE) \
+			-o wide $(REDIRECT_OUTPUT) || \
+			echo "❌ No pods found"; \
 		echo ""; \
 		echo "Recent Events:"; \
-		kubectl get events -n $(NAMESPACE) --sort-by=.lastTimestamp $(REDIRECT_OUTPUT) || echo "❌ No events found"; \
+		kubectl get events -n $(NAMESPACE) --sort-by=.lastTimestamp \
+			$(REDIRECT_OUTPUT) || echo "❌ No events found"; \
 	fi
 
-# Apply persistent volume
-apply-pv: validate-project
-	@echo "💾 Applying PersistentVolume configuration for project '$(PROJECT_NAME)'..."
-	@if [ -f "persistentvolume.yaml" ]; then \
-		if ! kubectl get nodes $(REDIRECT_OUTPUT); then \
-			echo "⚠️  No Kubernetes nodes found (cluster not ready). Skipping PV apply."; \
+# ============================================================================
+# CLEANUP AND UTILITY TARGETS
+# ============================================================================
+
+# Clean up all resources for the project: deployment, cluster, and Docker images
+clean: validate-project
+	@echo "🧹 Cleaning resources for project '$(PROJECT_NAME)'..."
+	@if [ "$(DEBUG)" = "1" ]; then \
+		echo "🗑️ Deleting deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'..."; \
+		if kubectl delete deployment $(PROJECT_NAME)-deployment \
+			-n $(NAMESPACE) --ignore-not-found=true --wait=true \
+			$(REDIRECT_OUTPUT); then \
+			echo "✅ Deployment deleted"; \
 		else \
-			NODE=$$(kubectl get nodes -o name | grep agent | head -1 | cut -d/ -f2); \
-			if [ -z "$$NODE" ]; then \
-				echo "⚠️ No agent node found. Skipping PV apply."; \
-			else \
-				CONTAINER_ID=$$(docker ps -q --filter name=$$NODE); \
-				if [ -n "$$CONTAINER_ID" ]; then \
-					docker exec $$CONTAINER_ID mkdir -p /tmp/kube; \
-				fi; \
-				sed "s/REPLACE_NODE_NAME/$$NODE/g" persistentvolume.yaml | kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
-				echo "✅ PersistentVolume applied successfully"; \
-			fi; \
+			echo "⚠️ Deployment not found or already deleted"; \
+		fi; \
+		echo "🗑️ Deleting cluster '$(CLUSTER_NAME)'..."; \
+		if k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+			echo "✅ Cluster deleted"; \
+		else \
+			echo "⚠️ Cluster not found or already deleted"; \
+		fi; \
+		echo "🗑️ Removing Docker image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
+		if docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
+			echo "✅ Image deleted"; \
+		else \
+			echo "⚠️ Image not found or already deleted"; \
 		fi; \
 	else \
-		echo "ℹ️  No cluster-scoped persistentvolume.yaml found in repo root; skipping PV apply"; \
+		kubectl delete deployment $(PROJECT_NAME)-deployment \
+			-n $(NAMESPACE) --ignore-not-found=true --wait=true \
+			$(REDIRECT_OUTPUT) || true; \
+		k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT) || true; \
 	fi
+	@echo "✅ Cleanup complete for project '$(PROJECT_NAME)'!"
 
-# Delete persistent volume
+# Remove PersistentVolume and associated resources
 delete-pv:
 	@echo "🗑️  Deleting PersistentVolume..."
 	@if [ -f "persistentvolume.yaml" ]; then \
 		echo "🔍 Checking for existing PVCs..."; \
-		if kubectl get pvc -A --no-headers 2>/dev/null | grep -q shared-storage-claim; then \
+		if kubectl get pvc -A --no-headers 2>/dev/null | \
+			grep -q shared-storage-claim; then \
 			echo "⚠️  Found PVCs still using the PV. Force deleting PVCs..."; \
-			kubectl delete pvc shared-storage-claim --all-namespaces --grace-period=0 --force --timeout=5s 2>/dev/null || true; \
+			kubectl delete pvc shared-storage-claim --all-namespaces \
+				--grace-period=0 --force --timeout=5s 2>/dev/null || true; \
 		fi; \
 		echo "🗑️  Removing finalizers from PV..."; \
-		kubectl patch pv $(shell kubectl get pv -o jsonpath='{.items[?(@.spec.claimRef.name=="shared-storage-claim")].metadata.name}') -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
+		kubectl patch pv $$(kubectl get pv \
+			-o jsonpath='{.items[?(@.spec.claimRef.name=="shared-storage-claim")].metadata.name}') \
+			-p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
 		echo "🔨 Deleting PV..."; \
-		kubectl delete -f persistentvolume.yaml --grace-period=0 --force --timeout=5s 2>/dev/null || true; \
+		kubectl delete -f persistentvolume.yaml --grace-period=0 \
+			--force --timeout=5s 2>/dev/null || true; \
 		echo "✅ PersistentVolume cleanup completed"; \
 	else \
 		echo "❌ persistentvolume.yaml not found in the current directory"; \
 		exit 1; \
 	fi
 
-# Run TARGET for a comma-separated list in PROJECT_NAME (e.g., "ping-pong, log-output")
+# ============================================================================
+# MULTI-PROJECT AND ADVANCED TARGETS
+# ============================================================================
+
+# Execute the specified TARGET for all discovered projects
+all-projects:
+	@for proj in $(PROJECTS); do \
+		echo "==== Running '$(TARGET)' for $$proj ===="; \
+		$(MAKE) $(TARGET) PROJECT_NAME=$$proj; \
+	done
+
+# Execute the specified TARGET for a comma-separated list of projects
 multi-projects:
 	@for p in $(shell echo $(PROJECT_NAME) | tr ',' ' ' | xargs); do \
 		echo "==== Running build for $$p ===="; \
