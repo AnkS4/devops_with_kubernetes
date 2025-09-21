@@ -53,3 +53,31 @@ spec:
   claimRef:
     namespace: log-output-ns
     name: shared-storage-claim
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: shared-app-pv-project
+  labels:
+    app: shared-storage
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 100Mi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  local:
+    path: /tmp/kube
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - REPLACE_NODE_NAME
+  claimRef:
+    namespace: project-ns
+    name: shared-storage-claim

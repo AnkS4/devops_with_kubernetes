@@ -23,4 +23,11 @@ spec:
           env:
             - name: PORT
               value: "8001"
+          volumeMounts:
+            - name: cache-volume
+              mountPath: /app/shared
+      volumes:
+        - name: cache-volume
+          persistentVolumeClaim:
+            claimName: shared-storage-claim
       restartPolicy: Always
