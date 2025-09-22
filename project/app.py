@@ -50,6 +50,18 @@ async def root():
     <html><body>
         <h1>The Project App</h1>
         <img src="/image" alt="Random Picture" style="max-width: 100%; height: auto;">
+        
+        <h2>Todo App</h2>
+        <form>
+            <input type="text" maxlength="140" placeholder="Enter a new todo">
+            <button type="submit">Send</button>
+        </form>
+        <ul>
+            <li>Finish the project</li>
+            <li>Learn Kubernetes</li>
+            <li>Schedule a meeting</li>
+        </ul>
+        
         <footer>DevOps with Kubernetes 2025</footer>
     </body></html>
     """)
