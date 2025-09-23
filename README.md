@@ -61,3 +61,5 @@ make rebuild PROJECT_NAME=<project_name>
 - [1.8.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.8/project)
 - [1.9.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.9/ping_pong)
 - [1.10.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.10/log_output)
+- [1.11.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.11)
+- [1.12.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.12)
