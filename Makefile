@@ -826,6 +826,6 @@ all-projects:
 # Execute the specified TARGET for a comma-separated list of projects
 multi-projects:
 	@for p in $(shell echo $(PROJECT_NAME) | tr ',' ' ' | xargs); do \
-		echo "==== Running build for $$p ===="; \
-		$(MAKE) build PROJECT_NAME=$$p; \
+		echo "==== Running $(TARGET) for $$p ===="; \
+		$(MAKE) $(TARGET) PROJECT_NAME=$$p; \
 	done
