@@ -1,22 +1,24 @@
 import time, uuid
 from datetime import datetime, UTC
-from pathlib import Path
+# from pathlib import Path
 
-# Use a shared volume path
-LOG_FILE = Path("/app/shared/status.txt")
+# # Use a shared volume path
+# LOG_FILE = Path("/app/shared/status.txt")
 
 def status_updater():
-    # Ensure the shared directory exists
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # # Ensure the shared directory exists
+    # LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     
     while True:
         now = datetime.now(UTC)
         timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.') + f"{now.microsecond // 1000:03d}Z"
         random_string = str(uuid.uuid4())
         status = f"{timestamp}: {random_string}"
-        # Overwrite the file to just write the current status
-        with LOG_FILE.open("w") as f:
-            f.write(status)
+        # No need to write to file anymore, just print for logs
+        print(f"Generated status: {status}")
+        # # Overwrite the file to just write the current status
+        # with LOG_FILE.open("w") as f:
+        #     f.write(status)
         time.sleep(5)
 
 if __name__ == "__main__":

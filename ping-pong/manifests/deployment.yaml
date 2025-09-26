@@ -20,16 +20,16 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8002
-          volumeMounts:
-            - name: shared-storage
-              mountPath: /app/shared
+          # volumeMounts:
+          #   - name: shared-storage
+          #     mountPath: /app/shared
           env:
             - name: PORT
               value: "8002"
-            - name: SHARED_VOLUME_PATH
-              value: "/app/shared/request_count.txt"
-      volumes:
-        - name: shared-storage
-          persistentVolumeClaim:
-            claimName: shared-storage-claim
+            # - name: SHARED_VOLUME_PATH
+            #   value: "/app/shared/request_count.txt"
+      # volumes:
+      #   - name: shared-storage
+      #     persistentVolumeClaim:
+      #       claimName: shared-storage-claim
       restartPolicy: Always
