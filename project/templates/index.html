@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Project App</title>
+    <style>
+        body{font-family:system-ui;max-width:800px;margin:0 auto;padding:20px}
+        img{max-width:100%}
+        form{margin:20px 0}
+        input{padding:8px;width:70%}
+        button{padding:8px 16px}
+    </style>
+</head>
+<body>
+    <h1>The Project App</h1>
+    <img src="/image" alt="Random Picture">
+    <h2>Todo App</h2>
+    <form id="todo-form">
+        <input type="text" id="todo-input" maxlength="140" placeholder="Enter a new todo">
+        <button type="submit">Send</button>
+    </form>
+    <ul id="todo-list"></ul>
+    <footer>DevOps with Kubernetes 2025</footer>
+    <script>
+    fetch('/todos').then(r=>r.json()).then(d=>{d.todos.forEach(t=>{const li=document.createElement('li');li.textContent=t.text;document.getElementById('todo-list').appendChild(li);})});
+    document.getElementById('todo-form').onsubmit=e=>{e.preventDefault();const i=document.getElementById('todo-input');const t=i.value.trim();if(t){fetch('/todos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}).then(()=>location.reload());i.value='';}};
+    </script>
+</body>
+</html>

@@ -15,3 +15,10 @@ spec:
                 name: project-svc
                 port:
                   number: 1234
+          - path: /todos
+            pathType: Prefix
+            backend:
+              service:
+                name: project-svc
+                port:
+                  number: 1235

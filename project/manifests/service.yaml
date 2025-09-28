@@ -11,3 +11,7 @@ spec:
       protocol: TCP
       port: 1234
       targetPort: 8001
+    - name: http-backend
+      protocol: TCP
+      port: 1235
+      targetPort: 8003

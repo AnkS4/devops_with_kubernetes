@@ -1,10 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 import httpx
 import time
 from pathlib import Path
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 app = FastAPI()
+
+# Set up templates
+templates = Jinja2Templates(directory="templates")
 
 IMAGE_PATH = Path("/app/shared/cache/image.jpg")
 FALLBACK_PATH = Path("/tmp/fallback.jpg")
@@ -44,27 +49,9 @@ async def get_image():
     except Exception:
         return None
 
-@app.get("/")
-async def root():
-    return HTMLResponse("""
-    <html><body>
-        <h1>The Project App</h1>
-        <img src="/image" alt="Random Picture" style="max-width: 100%; height: auto;">
-        
-        <h2>Todo App</h2>
-        <form>
-            <input type="text" maxlength="140" placeholder="Enter a new todo">
-            <button type="submit">Send</button>
-        </form>
-        <ul>
-            <li>Finish the project</li>
-            <li>Learn Kubernetes</li>
-            <li>Schedule a meeting</li>
-        </ul>
-        
-        <footer>DevOps with Kubernetes 2025</footer>
-    </body></html>
-    """)
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/image")
 async def image():

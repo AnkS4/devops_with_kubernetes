@@ -15,14 +15,25 @@ spec:
         app: project
     spec:
       containers:
-        - name: project-container
-          image: project-app:latest
+        - name: project-main
+          image: project-app-main:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8001
           env:
             - name: PORT
               value: "8001"
+          volumeMounts:
+            - name: cache-volume
+              mountPath: /app/shared
+        - name: project-backend
+          image: project-app-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8003
+          env:
+            - name: PORT
+              value: "8003"
           volumeMounts:
             - name: cache-volume
               mountPath: /app/shared

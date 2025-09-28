@@ -342,6 +342,36 @@ build-image: validate-project
 				echo "❌ $$image build failed"; exit 1; \
 			fi; \
 		done; \
+				echo "✅ All images built successfully"; \
+	elif [ "$(PROJECT_NAME)" = "project" ]; then \
+		IMAGE_NAME1="$(IMAGE_NAME)-main:$(IMAGE_TAG)"; \
+		IMAGE_NAME2="$(IMAGE_NAME)-backend:$(IMAGE_TAG)"; \
+		if [ "$(DEBUG)" = "1" ]; then \
+			echo "  Project: $(PROJECT_NAME)"; \
+			echo "  Main Image: $${IMAGE_NAME1}"; \
+			echo "  Backend Image: $${IMAGE_NAME2}"; \
+			echo "  Dockerfile: $(DOCKERFILE)"; \
+			echo "  Build context: $(BUILD_CONTEXT)"; \
+		fi; \
+		for image in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
+			if [ "$$image" = "$$IMAGE_NAME1" ]; then \
+				TARGET="main"; \
+			else \
+				TARGET="backend"; \
+			fi; \
+			if [ "$(DEBUG)" = "1" ]; then \
+				echo "Building $$image"; \
+			fi; \
+			if DOCKER_BUILDKIT=1 \
+				docker build -t "$$image" --target="$$TARGET" \
+				$(DOCKER_BUILD_ARGS) -f $(DOCKERFILE) \
+				$(DOCKER_BUILD_FLAGS) $(BUILD_CONTEXT) \
+				$(REDIRECT_OUTPUT); then \
+				echo "✅ $$image built successfully"; \
+			else \
+				echo "❌ $$image build failed"; exit 1; \
+			fi; \
+		done; \
 		echo "✅ All images built successfully"; \
 	else \
 		if [ "$(DEBUG)" = "1" ]; then \
@@ -414,6 +444,24 @@ preload-app-images: validate-project cluster-create
 	if [ "$(PROJECT_NAME)" = "log-output" ]; then \
 		IMAGE_NAME1="$(IMAGE_NAME)-generator:$(IMAGE_TAG)"; \
 		IMAGE_NAME2="$(IMAGE_NAME)-status:$(IMAGE_TAG)"; \
+		if [ "$(DEBUG)" = "1" ]; then \
+			echo "📤 Importing application images '$$IMAGE_NAME1' and '$$IMAGE_NAME2'..."; \
+		fi; \
+		for img in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
+			if docker image inspect "$$img" $(REDIRECT_OUTPUT); then \
+				if k3d image import "$$img" -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+					echo "✅ Successfully imported $$img"; \
+				else \
+					echo "❌ Failed to import $$img"; exit 1; \
+				fi; \
+			else \
+				echo "⚠️ Skipping import: local image '$$img' not found. Run 'make build' first."; \
+			fi; \
+		done; \
+		echo "✅ Successfully imported all application images"; \
+	elif [ "$(PROJECT_NAME)" = "project" ]; then \
+		IMAGE_NAME1="$(IMAGE_NAME)-main:$(IMAGE_TAG)"; \
+		IMAGE_NAME2="$(IMAGE_NAME)-backend:$(IMAGE_TAG)"; \
 		if [ "$(DEBUG)" = "1" ]; then \
 			echo "📤 Importing application images '$$IMAGE_NAME1' and '$$IMAGE_NAME2'..."; \
 		fi; \
