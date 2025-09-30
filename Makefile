@@ -51,6 +51,13 @@ PORT_HOST           ?= 127.0.0.1
 INGRESS_RETRIES     ?= 10
 INGRESS_WAIT_SECONDS ?= 5
 
+# Override namespace based on project type
+ifeq ($(PROJECT_NAME),log-output)
+	NAMESPACE := exercises
+else ifeq ($(PROJECT_NAME),ping-pong)
+	NAMESPACE := exercises
+endif
+
 # Function to find an available port starting from a base port
 define find_available_port
 $(shell \
