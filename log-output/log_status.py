@@ -10,6 +10,9 @@ from pathlib import Path
 
 app = FastAPI()
 
+# Get namespace from environment variable, default to 'exercises'
+PING_PONG_NAMESPACE = os.getenv('PING_PONG_NAMESPACE', 'exercises')
+
 # # Use the same shared volume path as the generator
 # STATUS_FILE = Path("/app/shared/status.txt")
 # REQUEST_COUNT_FILE = Path(os.getenv('SHARED_VOLUME_PATH', '/app/shared/request_count.txt'))
@@ -25,7 +28,7 @@ app = FastAPI()
 async def get_cluster_ip():
     try:
         # Use subprocess to run kubectl command
-        cmd = ["kubectl", "get", "svc", "-n", "ping-pong-ns", "ping-pong-svc", "-o", "jsonpath='{.spec.clusterIP}'"]
+        cmd = ["kubectl", "get", "svc", "-n", PING_PONG_NAMESPACE, "ping-pong-svc", "-o", "jsonpath='{.spec.clusterIP}'"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and result.stdout:
             # Remove quotes if present
@@ -43,7 +46,7 @@ async def get_cluster_ip():
 async def get_pod_ip():
     try:
         # Use subprocess to run kubectl command
-        cmd = ["kubectl", "get", "pods", "-n", "ping-pong-ns", "-l", "app=ping-pong", "-o", "jsonpath='{.items[0].status.podIP}'"]
+        cmd = ["kubectl", "get", "pods", "-n", PING_PONG_NAMESPACE, "-l", "app=ping-pong", "-o", "jsonpath='{.items[0].status.podIP}'"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and result.stdout:
             # Remove quotes if present
@@ -62,7 +65,7 @@ async def read_request_count():
     try:
         print("Trying fully qualified service name")
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get("http://ping-pong-svc.ping-pong-ns.svc.cluster.local:1234/pongs")
+            response = await client.get(f"http://ping-pong-svc.{PING_PONG_NAMESPACE}.svc.cluster.local:1234/pongs")
             print(f"Response status: {response.status_code}")
             response.raise_for_status()
             data = response.json()
@@ -75,7 +78,7 @@ async def read_request_count():
     try:
         print("Trying service name with namespace")
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get("http://ping-pong-svc.ping-pong-ns:1234/pongs")
+            response = await client.get(f"http://ping-pong-svc.{PING_PONG_NAMESPACE}:1234/pongs")
             print(f"Response status: {response.status_code}")
             response.raise_for_status()
             data = response.json()

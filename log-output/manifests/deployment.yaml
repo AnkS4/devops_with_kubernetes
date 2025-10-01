@@ -26,6 +26,10 @@ spec:
           #   - name: shared-storage
           #     mountPath: /app/shared
           env:
+            - name: PING_PONG_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             # - name: SHARED_VOLUME_PATH
             #   value: "/app/shared/request_count.txt"
         - name: log-output-status
@@ -40,6 +44,10 @@ spec:
           #     mountPath: /app/shared
           #     readOnly: true
           env:
+            - name: PING_PONG_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             # - name: SHARED_VOLUME_PATH
             #   value: "/app/shared/request_count.txt"
       # volumes:

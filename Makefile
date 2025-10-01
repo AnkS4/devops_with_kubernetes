@@ -561,9 +561,11 @@ deploy: validate-project
 	@if ! ls $(MANIFEST_DIR)/*.yaml $(REDIRECT_OUTPUT); then \
 		echo "❌ No *.yaml files in $(MANIFEST_DIR)"; exit 1; \
 	fi
-	@kubectl apply -f $(MANIFEST_DIR) -n $(NAMESPACE) \
-		$(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || \
-		(echo "❌ Failed to apply manifests"; exit 1)
+	@export NAMESPACE=$(NAMESPACE); \
+	for file in $(MANIFEST_DIR)/*.yaml; do \
+		envsubst < "$$file" | kubectl apply -n $(NAMESPACE) -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT) || \
+			(echo "❌ Failed to apply manifest: $$file"; exit 1); \
+	done
 	@echo "✅ Applied all manifests successfully!"
 	@echo "⏳ Waiting for rollout status ($(POD_READY_TIMEOUT)s timeout)..."
 	@kubectl rollout status deployment/$(PROJECT_NAME)-deployment \
