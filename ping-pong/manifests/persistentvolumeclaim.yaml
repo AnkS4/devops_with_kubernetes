@@ -4,6 +4,7 @@ metadata:
   name: shared-storage-claim
   labels:
     app: shared-storage
+    project: ${NAMESPACE}
 spec:
   storageClassName: local-storage
   accessModes:
@@ -14,4 +15,4 @@ spec:
   selector:
     matchLabels:
       app: shared-storage
-      namespace: ${NAMESPACE}
+      project: ${NAMESPACE}
