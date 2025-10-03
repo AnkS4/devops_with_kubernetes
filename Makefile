@@ -36,7 +36,7 @@ DOCKERFILE_DIR      := $(dir $(DOCKERFILE))
 DOCKER_BUILD_ARGS   ?=
 CLUSTER_NAME        ?= devops-cluster
 INGRESS_NAME        ?= $(PROJECT_NAME)-ingress
-NAMESPACE           ?= $(PROJECT_NAME)-ns
+NAMESPACE           ?= $(PROJECT_NAME)
 AGENTS              ?= 1
 IMAGE_PULL_POLICY   ?= IfNotPresent
 CLUSTER_TIMEOUT     ?= 300s
@@ -130,13 +130,13 @@ endif
 build: validate-project build-image cluster-create preload-images apply-pv deploy ingress
 
 # Remove all resources and rebuild from scratch
-build-clean: validate-project clean build-image cluster-create preload-images apply-pv deploy ingress
+build-clean: validate-project clean delete-pv build-image cluster-create preload-images apply-pv deploy ingress
 
 # ============================================================================
 # HELPER TARGETS
 # ============================================================================
 
-# Display comprehensive help information with usage examples and variable descriptions
+# Define default target
 default: help
 
 # Display comprehensive help information with usage examples and variable descriptions
@@ -149,10 +149,10 @@ help:
 	@echo "  build       Full workflow without cleaning cluster/resources (Recommended for multiple projects)"
 	@echo ""
 	@echo "🔧 Build & Deploy:"
-	@echo "  build-image  Build project Docker image"
-	@echo "  cluster      Create/start k3d cluster"
-	@echo "  deploy       Deploy project to cluster"
-	@echo "  clean        Remove project cluster & resources"
+	@echo "  build-image  	Build project Docker image"
+	@echo "  cluster-create Create/start k3d cluster"
+	@echo "  deploy       	Deploy project to cluster"
+	@echo "  clean        	Remove project cluster & resources"
 	@echo ""
 	@echo "📊 Monitor & Debug:"
 	@echo "  status     System status overview"
@@ -171,7 +171,7 @@ help:
 	@echo "  print-projects  List all available projects"
 	@echo "  all-projects   Run any TARGET (default: build) for all projects"
 	@echo "    e.g. make all-projects TARGET=clean"
-	@echo "    e.g. make clean PROJECT_NAME=project"
+	@echo "    e.g. make clean PROJECT_NAME=project"vvv
 	@echo ""
 	@echo "⚙️ Key Variables:"
 	@echo "  PROJECT_NAME=my-app  Set project name (required)"
@@ -183,7 +183,7 @@ help:
 	@echo " ---Two methods to run make---"
 	@echo " Method 1: Choosing a specific project to run make"
 	@echo "   make build-clean PROJECT_NAME=ping-pong                                  # Build and deploy ping-pong project"
-	@echo "   make multi-projects TARGET=build PROJECT_NAME="ping-pong, log-output"    # Build and deploy ping-pong and log-output projects"
+	@echo "   make multi-projects TARGET=build PROJECT_NAME=\"ping-pong, log-output\"  # Build and deploy ping-pong and log-output projects"
 	@echo "   make clean PROJECT_NAME=project                                          # Clean up a specific project"
 	@echo "   make delete-pv PROJECT_NAME=project                                      # Delete PersistentVolume for a specific project"
 	@echo "   make build-clean PROJECT_NAME=ping-pong AGENTS=2 DEBUG=1                 # Rebuild with debug output and two agents"
@@ -518,8 +518,9 @@ apply-pv: validate-project
 				if [ -n "$$CONTAINER_ID" ]; then \
 					docker exec $$CONTAINER_ID mkdir -p /tmp/kube; \
 				fi; \
+				export NAMESPACE=$(NAMESPACE); \
 				sed "s/REPLACE_NODE_NAME/$$NODE/g" persistentvolume.yaml | \
-					kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
+					envsubst | kubectl apply -f - $(KUBECTL_VERBOSITY) $(REDIRECT_OUTPUT); \
 				echo "✅ PersistentVolume applied successfully"; \
 			fi; \
 		fi; \
@@ -528,7 +529,7 @@ apply-pv: validate-project
 	fi
 
 # Apply Kubernetes manifests and wait for deployment rollout
-deploy: validate-project
+deploy: validate-project apply-pv
 	@echo "🚀 Deploying application '$(PROJECT_NAME)'..."
 	@if [ "$(DEBUG)" = "1" ]; then \
 		echo " Deployment: $(PROJECT_NAME)-deployment"; \
@@ -812,62 +813,59 @@ debug: validate-project
 # CLEANUP AND UTILITY TARGETS
 # ============================================================================
 
-# Clean up all resources for the project: deployment, cluster, and Docker images
+# Clean up all resources for the project: deployment, services, ingress, PVC, and Docker images
 clean: validate-project
 	@echo "🧹 Cleaning resources for project '$(PROJECT_NAME)'..."
-	@if [ "$(DEBUG)" = "1" ]; then \
-		echo "🗑️ Deleting deployment '$(PROJECT_NAME)-deployment' in namespace '$(NAMESPACE)'..."; \
-		if kubectl delete deployment $(PROJECT_NAME)-deployment \
-			-n $(NAMESPACE) --ignore-not-found=true --wait=true \
-			$(REDIRECT_OUTPUT); then \
-			echo "✅ Deployment deleted"; \
-		else \
-			echo "⚠️ Deployment not found or already deleted"; \
-		fi; \
-		echo "🗑️ Deleting cluster '$(CLUSTER_NAME)'..."; \
-		if k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
-			echo "✅ Cluster deleted"; \
-		else \
-			echo "⚠️ Cluster not found or already deleted"; \
-		fi; \
-		echo "🗑️ Removing Docker image '$(IMAGE_NAME):$(IMAGE_TAG)'..."; \
-		if docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT); then \
-			echo "✅ Image deleted"; \
-		else \
-			echo "⚠️ Image not found or already deleted"; \
-		fi; \
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Deleting Kubernetes resources in namespace '$(NAMESPACE)'..." || true
+	@kubectl delete deployment $(PROJECT_NAME)-deployment \
+		-n $(NAMESPACE) --ignore-not-found=true --wait=false \
+		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ Deployment not found" || true
+	@kubectl delete svc $(PROJECT_NAME)-svc \
+		-n $(NAMESPACE) --ignore-not-found=true \
+		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ Service not found" || true
+	@kubectl delete ingress $(PROJECT_NAME)-ingress \
+		-n $(NAMESPACE) --ignore-not-found=true \
+		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ Ingress not found" || true
+	@kubectl delete pvc shared-storage-claim \
+		-n $(NAMESPACE) --ignore-not-found=true \
+		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ PVC not found" || true
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Removing Docker images..." || true
+	@if [ "$(PROJECT_NAME)" = "log-output" ]; then \
+		docker rmi log-output-app-generator:latest log-output-app-status:latest \
+			$(REDIRECT_OUTPUT) 2>/dev/null || true; \
+	elif [ "$(PROJECT_NAME)" = "project" ]; then \
+		docker rmi project-app-main:latest project-app-backend:latest \
+			$(REDIRECT_OUTPUT) 2>/dev/null || true; \
 	else \
-		kubectl delete deployment $(PROJECT_NAME)-deployment \
-			-n $(NAMESPACE) --ignore-not-found=true --wait=true \
-			$(REDIRECT_OUTPUT) || true; \
-		k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
-		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT) || true; \
+		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT) 2>/dev/null || true; \
 	fi
 	@echo "✅ Cleanup complete for project '$(PROJECT_NAME)'!"
 
 # Remove PersistentVolume and associated resources
 delete-pv:
-	@echo "🗑️  Deleting PersistentVolume..."
-	@if [ -f "persistentvolume.yaml" ]; then \
-		echo "🔍 Checking for existing PVCs..."; \
-		if kubectl get pvc -A --no-headers 2>/dev/null | \
-			grep -q shared-storage-claim; then \
-			echo "⚠️  Found PVCs still using the PV. Force deleting PVCs..."; \
-			kubectl delete pvc shared-storage-claim --all-namespaces \
-				--grace-period=0 --force --timeout=5s 2>/dev/null || true; \
-		fi; \
-		echo "🗑️  Removing finalizers from PV..."; \
-		kubectl patch pv $$(kubectl get pv \
-			-o jsonpath='{.items[?(@.spec.claimRef.name=="shared-storage-claim")].metadata.name}') \
-			-p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
-		echo "🔨 Deleting PV..."; \
-		kubectl delete -f persistentvolume.yaml --grace-period=0 \
-			--force --timeout=5s 2>/dev/null || true; \
-		echo "✅ PersistentVolume cleanup completed"; \
-	else \
-		echo "❌ persistentvolume.yaml not found in the current directory"; \
-		exit 1; \
+	@echo "🗑️  Deleting PersistentVolumes..."
+	@if [ ! -f "persistentvolume.yaml" ]; then \
+		echo "⚠️  persistentvolume.yaml not found, skipping"; \
+		exit 0; \
 	fi
+	@echo "🗑️  Removing finalizers and deleting PVs..."
+	@kubectl get pv -o name 2>/dev/null | grep shared-app-pv | \
+		xargs -r kubectl patch -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
+	@kubectl delete -f persistentvolume.yaml --grace-period=0 --force --timeout=10s 2>/dev/null || true
+	@echo "✅ PersistentVolume cleanup completed"
+
+# Clean all projects and shared resources (cluster, PVs)
+clean-all:
+	@echo "🧹 Starting complete cleanup of all resources..."
+	@for proj in $(PROJECTS); do \
+		echo "  - Cleaning project: $$proj"; \
+		$(MAKE) clean PROJECT_NAME=$$proj 2>/dev/null || true; \
+	done
+	@echo "🗑️  Deleting PVs..."
+	@$(MAKE) delete-pv 2>/dev/null || true
+	@echo "🗑️  Deleting cluster '$(CLUSTER_NAME)'..."
+	@k3d cluster delete $(CLUSTER_NAME) $(REDIRECT_OUTPUT) 2>/dev/null || true
+	@echo "✅ Complete cleanup finished! All resources removed."
 
 # ============================================================================
 # MULTI-PROJECT AND ADVANCED TARGETS

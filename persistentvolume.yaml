@@ -23,29 +23,3 @@ spec:
           operator: In
           values:
           - REPLACE_NODE_NAME
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: shared-app-pv-${NAMESPACE}
-  labels:
-    app: shared-storage
-    project: ${NAMESPACE}
-spec:
-  storageClassName: local-storage
-  capacity:
-    storage: 100Mi
-  volumeMode: Filesystem
-  accessModes:
-  - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  local:
-    path: /tmp/kube
-  nodeAffinity:
-    required:
-      nodeSelectorTerms:
-      - matchExpressions:
-        - key: kubernetes.io/hostname
-          operator: In
-          values:
-          - REPLACE_NODE_NAME
