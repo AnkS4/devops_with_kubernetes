@@ -65,3 +65,6 @@ make rebuild PROJECT_NAME=<project_name>
 - [1.12.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.12)
 - [1.13.](https://github.com/AnkS4/devops_with_kubernetes/tree/1.13)
 - [2.1.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.1)
+- [2.2.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.2-patch1)
+- [2.3.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.3-patch3)
+- [2.4.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.4)
