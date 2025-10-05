@@ -8,6 +8,17 @@ from datetime import datetime, timezone
 import uuid
 from pathlib import Path
 
+# Read ConfigMap file
+CONFIG_FILE_PATH = Path("/etc/config/information.txt")
+MESSAGE_ENV = os.getenv('MESSAGE', '')
+
+def read_config_file():
+    try:
+        with CONFIG_FILE_PATH.open('r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return "file not found"
+
 app = FastAPI()
 
 # Get namespace from environment variable, default to 'exercises'
@@ -132,6 +143,9 @@ def root():
 @app.get("/status", response_class=PlainTextResponse)
 async def status():
     try:
+        # Read ConfigMap data
+        file_content = read_config_file()
+        
         # Generate timestamp and random string (previously from file)
         now = datetime.now(timezone.utc)
         timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.') + f"{now.microsecond // 1000:03d}Z"
@@ -142,7 +156,7 @@ async def status():
         request_count = await read_request_count()
         
         # Return plain text with actual newlines
-        return f"{status_message}\nPing / Pongs: {request_count}"
+        return f"file content: {file_content}\nenv variable: MESSAGE={MESSAGE_ENV}\n{status_message}\nPing / Pongs: {request_count}"
     except Exception as e:
         print(f"Error in status endpoint: {e}")
         raise HTTPException(status_code=404, detail="Status not available yet.")

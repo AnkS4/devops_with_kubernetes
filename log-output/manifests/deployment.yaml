@@ -39,6 +39,10 @@ spec:
             - name: http
               containerPort: 8002
               protocol: TCP
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/config
+              readOnly: true
           # volumeMounts:
           #   - name: shared-storage
           #     mountPath: /app/shared
@@ -50,6 +54,18 @@ spec:
                   fieldPath: metadata.namespace
             # - name: SHARED_VOLUME_PATH
             #   value: "/app/shared/request_count.txt"
+            - name: MESSAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: log-output-config
+                  key: MESSAGE
+      volumes:
+        - name: config-volume
+          configMap:
+            name: log-output-config
+            items:
+              - key: information.txt
+                path: information.txt
       # volumes:
       #   - name: shared-storage
       #     persistentVolumeClaim:
