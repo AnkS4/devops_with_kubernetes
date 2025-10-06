@@ -1,5 +1,3 @@
-import os
-import socket
 import subprocess
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -7,22 +5,35 @@ import httpx
 from datetime import datetime, timezone
 import uuid
 from pathlib import Path
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
-# Read ConfigMap file
-CONFIG_FILE_PATH = Path("/etc/config/information.txt")
-MESSAGE_ENV = os.getenv('MESSAGE', '')
+# Settings configuration
+class Settings(BaseSettings):
+    message: str = Field(default='', alias='MESSAGE')
+    config_file_path: str = Field(
+        default='/etc/config/information.txt',
+        alias='CONFIG_FILE_PATH'
+    )
+    ping_pong_namespace: str = Field(
+        default='exercises',
+        alias='PING_PONG_NAMESPACE'
+    )
+    
+    class Config:
+        case_sensitive = True
+        populate_by_name = True
+
+settings = Settings()
 
 def read_config_file():
     try:
-        with CONFIG_FILE_PATH.open('r') as f:
+        with Path(settings.config_file_path).open('r') as f:
             return f.read().strip()
     except FileNotFoundError:
         return "file not found"
 
 app = FastAPI()
-
-# Get namespace from environment variable, default to 'exercises'
-PING_PONG_NAMESPACE = os.getenv('PING_PONG_NAMESPACE', 'exercises')
 
 # # Use the same shared volume path as the generator
 # STATUS_FILE = Path("/app/shared/status.txt")
