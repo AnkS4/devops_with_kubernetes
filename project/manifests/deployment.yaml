@@ -23,6 +23,36 @@ spec:
           env:
             - name: PORT
               value: "8001"
+            - name: IMAGE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: project-config
+                  key: IMAGE_URL
+            - name: IMAGE_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: project-config
+                  key: IMAGE_WIDTH
+            - name: CACHE_DURATION
+              valueFrom:
+                configMapKeyRef:
+                  name: project-config
+                  key: CACHE_DURATION
+            - name: IMAGE_CACHE_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: project-config
+                  key: IMAGE_CACHE_PATH
+            - name: FALLBACK_IMAGE_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: project-config
+                  key: FALLBACK_IMAGE_PATH
+            - name: HTTP_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: project-config
+                  key: HTTP_TIMEOUT
           volumeMounts:
             - name: cache-volume
               mountPath: /app/shared

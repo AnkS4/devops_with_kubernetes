@@ -5,15 +5,42 @@ from pathlib import Path
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
+
+# Settings configuration
+class Settings(BaseSettings):
+    image_cache_path: str = Field(
+        default='/app/shared/cache/image.jpg',
+        alias='IMAGE_CACHE_PATH'
+    )
+    fallback_image_path: str = Field(
+        default='/tmp/fallback.jpg',
+        alias='FALLBACK_IMAGE_PATH'
+    )
+    cache_duration: int = Field(default=600, alias='CACHE_DURATION')
+    image_url: str = Field(
+        default='https://picsum.photos/seed',
+        alias='IMAGE_URL'
+    )
+    image_width: str = Field(default='800', alias='IMAGE_WIDTH')
+    http_timeout: float = Field(default=10.0, alias='HTTP_TIMEOUT')
+    
+    class Config:
+        case_sensitive = True
+        populate_by_name = True
+
+settings = Settings()
 
 app = FastAPI()
 
 # Set up templates
 templates = Jinja2Templates(directory="templates")
 
-IMAGE_PATH = Path("/app/shared/cache/image.jpg")
-FALLBACK_PATH = Path("/tmp/fallback.jpg")
-CACHE_DURATION = 600  # 10 minutes
+# Configuration values
+IMAGE_PATH = Path(settings.image_cache_path)
+FALLBACK_PATH = Path(settings.fallback_image_path)
 
 async def get_image():
     """Get cached image or fetch new one"""
@@ -24,14 +51,14 @@ async def get_image():
         # Check cache
         if IMAGE_PATH.exists():
             age = time.time() - IMAGE_PATH.stat().st_mtime
-            if age < CACHE_DURATION:
+            if age < settings.cache_duration:
                 return IMAGE_PATH
         
         # Fetch new image
-        seed = int(time.time() // CACHE_DURATION)
-        url = f"https://picsum.photos/seed/{seed}/800"
+        seed = int(time.time() // settings.cache_duration)
+        url = f"{settings.image_url}/{seed}/{settings.image_width}"
         
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=settings.http_timeout, follow_redirects=True) as client:
             response = await client.get(url)
             response.raise_for_status()
             

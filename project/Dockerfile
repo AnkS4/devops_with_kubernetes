@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY templates/ templates/
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8001}"]
 
 # Build backend app image
 FROM base AS backend
@@ -23,4 +23,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app_backend.py .
 
-CMD ["uvicorn", "app_backend:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["sh", "-c", "uvicorn app_backend:app --host 0.0.0.0 --port ${PORT:-8003}"]

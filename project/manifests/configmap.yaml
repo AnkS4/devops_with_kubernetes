@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: project-config
+data:
+  IMAGE_URL: "https://picsum.photos/seed"
+  IMAGE_WIDTH: "800"
+  CACHE_DURATION: "600"
+  IMAGE_CACHE_PATH: "/app/shared/cache/image.jpg"
+  FALLBACK_IMAGE_PATH: "/tmp/fallback.jpg"
+  HTTP_TIMEOUT: "10.0"
