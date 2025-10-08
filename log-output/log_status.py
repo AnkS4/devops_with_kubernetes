@@ -50,7 +50,7 @@ app = FastAPI()
 async def get_cluster_ip():
     try:
         # Use subprocess to run kubectl command
-        cmd = ["kubectl", "get", "svc", "-n", PING_PONG_NAMESPACE, "ping-pong-svc", "-o", "jsonpath='{.spec.clusterIP}'"]
+        cmd = ["kubectl", "get", "svc", "-n", settings.ping_pong_namespace, "ping-pong-svc", "-o", "jsonpath='{.spec.clusterIP}'"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and result.stdout:
             # Remove quotes if present
@@ -68,7 +68,7 @@ async def get_cluster_ip():
 async def get_pod_ip():
     try:
         # Use subprocess to run kubectl command
-        cmd = ["kubectl", "get", "pods", "-n", PING_PONG_NAMESPACE, "-l", "app=ping-pong", "-o", "jsonpath='{.items[0].status.podIP}'"]
+        cmd = ["kubectl", "get", "pods", "-n", settings.ping_pong_namespace, "-l", "app=ping-pong", "-o", "jsonpath='{.items[0].status.podIP}'"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and result.stdout:
             # Remove quotes if present
@@ -87,7 +87,7 @@ async def read_request_count():
     try:
         print("Trying fully qualified service name")
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"http://ping-pong-svc.{PING_PONG_NAMESPACE}.svc.cluster.local:1234/pongs")
+            response = await client.get(f"http://ping-pong-svc.{settings.ping_pong_namespace}.svc.cluster.local:1234/pongs")
             print(f"Response status: {response.status_code}")
             response.raise_for_status()
             data = response.json()
@@ -100,7 +100,7 @@ async def read_request_count():
     try:
         print("Trying service name with namespace")
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"http://ping-pong-svc.{PING_PONG_NAMESPACE}:1234/pongs")
+            response = await client.get(f"http://ping-pong-svc.{settings.ping_pong_namespace}:1234/pongs")
             print(f"Response status: {response.status_code}")
             response.raise_for_status()
             data = response.json()
@@ -167,7 +167,7 @@ async def status():
         request_count = await read_request_count()
         
         # Return plain text with actual newlines
-        return f"file content: {file_content}\nenv variable: MESSAGE={MESSAGE_ENV}\n{status_message}\nPing / Pongs: {request_count}"
+        return f"file content: {file_content}\nenv variable: MESSAGE={settings.message}\n{status_message}\nPing / Pongs: {request_count}"
     except Exception as e:
         print(f"Error in status endpoint: {e}")
         raise HTTPException(status_code=404, detail="Status not available yet.")
