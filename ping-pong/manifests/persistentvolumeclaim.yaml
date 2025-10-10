@@ -3,7 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: shared-storage-claim
   labels:
-    app: shared-storage
+    app: postgres
     project: ${NAMESPACE}
 spec:
   storageClassName: local-storage
