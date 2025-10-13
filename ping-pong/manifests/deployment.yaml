@@ -15,21 +15,30 @@ spec:
         app: ping-pong
     spec:
       containers:
-        - name: ping-pong-container
-          image: ping-pong-app:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8002
-          # volumeMounts:
-          #   - name: shared-storage
-          #     mountPath: /app/shared
-          env:
-            - name: PORT
-              value: "8002"
-            # - name: SHARED_VOLUME_PATH
-            #   value: "/app/shared/request_count.txt"
-      # volumes:
-      #   - name: shared-storage
-      #     persistentVolumeClaim:
-      #       claimName: shared-storage-claim
-      restartPolicy: Always
+      - name: ping-pong-container
+        image: ping-pong-app:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8002
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3

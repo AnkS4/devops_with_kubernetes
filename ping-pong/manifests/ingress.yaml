@@ -2,16 +2,18 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: ping-pong-ingress
+  labels:
+    app: ping-pong
 spec:
   ingressClassName: traefik
   rules:
-    - host: ping-pong.local
-      http:
-        paths:
-          - path: /pingpong
-            pathType: Prefix
-            backend:
-              service:
-                name: ping-pong-svc
-                port:
-                  number: 1234
+  - host: ping-pong.local
+    http:
+      paths:
+      - path: /pingpong
+        pathType: Prefix
+        backend:
+          service:
+            name: ping-pong-svc
+            port:
+              number: 1234
