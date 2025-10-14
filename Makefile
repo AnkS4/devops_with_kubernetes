@@ -44,7 +44,7 @@ POD_READY_TIMEOUT   ?= 30
 RESTART_POLICY      ?= Never
 DEBUG               ?= 0
 K3D_RESOLV_FILE     ?= k3s-resolv.conf
-K3D_FIX_DNS         ?= 0
+K3D_FIX_DNS         ?= 1
 PORT_MIN            ?= 8000
 PORT_MAX            ?= 8099
 PORT_HOST           ?= 127.0.0.1
@@ -56,6 +56,8 @@ ifeq ($(PROJECT_NAME),log-output)
 	NAMESPACE := exercises
 else ifeq ($(PROJECT_NAME),ping-pong)
 	NAMESPACE := exercises
+	# Increase timeout for PostgreSQL initialization (database + app restarts)
+    POD_READY_TIMEOUT := 120
 endif
 
 # Function to find an available port starting from a base port
@@ -407,6 +409,7 @@ cluster-create: validate-project
 			echo "🔧 Starting cluster if stopped..."; \
 		fi; \
 		k3d cluster start $(CLUSTER_NAME) $(REDIRECT_OUTPUT) || true; \
+		kubectl config use-context k3d-$(CLUSTER_NAME) >/dev/null 2>&1; \
 	else \
 		if [ "$(DEBUG)" = "1" ]; then \
 			echo "🔧 Creating cluster '$(CLUSTER_NAME)' with $(AGENTS) agent(s)..."; \
@@ -416,6 +419,7 @@ cluster-create: validate-project
 			-p "$(TRAEFIK_HTTPS_PORT):443@loadbalancer" \
 			--timeout $(CLUSTER_TIMEOUT) $(REDIRECT_OUTPUT); then \
 			echo "✅ Cluster created successfully"; \
+			kubectl config use-context k3d-$(CLUSTER_NAME) >/dev/null 2>&1; \
 		else \
 			echo "❌ Cluster creation failed"; exit 1; \
 		fi; \
@@ -481,6 +485,26 @@ preload-app-images: validate-project cluster-create
 				fi; \
 			else \
 				echo "⚠️ Skipping import: local image '$$img' not found. Run 'make build' first."; \
+			fi; \
+		done; \
+		echo "✅ Successfully imported all application images"; \
+	elif [ "$(PROJECT_NAME)" = "ping-pong" ]; then \
+		IMAGE_NAME1="$(IMAGE_NAME):$(IMAGE_TAG)"; \
+		IMAGE_NAME2="postgres:13-alpine"; \
+		if [ "$(DEBUG)" = "1" ]; then \
+			echo "📤 Importing application images '$$IMAGE_NAME1' and '$$IMAGE_NAME2'..."; \
+		fi; \
+		for img in $$IMAGE_NAME1 $$IMAGE_NAME2; do \
+			if docker image inspect "$$img" >/dev/null 2>&1; then \
+				[ "$(DEBUG)" = "1" ] && echo "⏭️ Using local image $$img" || true; \
+			else \
+				echo "📥 Pulling $$img..."; \
+				docker pull "$$img" $(REDIRECT_OUTPUT) || { echo "❌ Failed to pull $$img"; exit 1; }; \
+			fi; \
+			if k3d image import "$$img" -c $(CLUSTER_NAME) $(REDIRECT_OUTPUT); then \
+				echo "✅ Successfully imported $$img"; \
+			else \
+				echo "❌ Failed to import $$img"; exit 1; \
 			fi; \
 		done; \
 		echo "✅ Successfully imported all application images"; \
@@ -813,45 +837,153 @@ debug: validate-project
 # CLEANUP AND UTILITY TARGETS
 # ============================================================================
 
-# Clean up all resources for the project: deployment, services, ingress, PVC, and Docker images
+# Clean up all resources for the project: deployment, services, ingress, PVC, StatefulSets, ConfigMaps, Secrets
 clean: validate-project
 	@echo "🧹 Cleaning resources for project '$(PROJECT_NAME)'..."
-	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Deleting Kubernetes resources in namespace '$(NAMESPACE)'..." || true
-	@kubectl delete deployment $(PROJECT_NAME)-deployment \
-		-n $(NAMESPACE) --ignore-not-found=true --wait=false \
-		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ Deployment not found" || true
-	@kubectl delete svc $(PROJECT_NAME)-svc \
-		-n $(NAMESPACE) --ignore-not-found=true \
-		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ Service not found" || true
-	@kubectl delete ingress $(PROJECT_NAME)-ingress \
-		-n $(NAMESPACE) --ignore-not-found=true \
-		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ Ingress not found" || true
-	@kubectl delete pvc shared-storage-claim \
-		-n $(NAMESPACE) --ignore-not-found=true \
-		$(REDIRECT_OUTPUT) || [ "$(DEBUG)" = "1" ] && echo "⚠️ PVC not found" || true
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Deleting workload resources..." || true
+	@if kubectl get deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) 2>/dev/null | grep -q $(PROJECT_NAME)-deployment; then \
+		kubectl delete deployment $(PROJECT_NAME)-deployment -n $(NAMESPACE) --wait=false >/dev/null 2>&1 && \
+		echo "  ✅ Deleted deployment $(PROJECT_NAME)-deployment" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  Deployment $(PROJECT_NAME)-deployment not found" || true; \
+	fi
+	@if kubectl get statefulset -n $(NAMESPACE) -l app=$(PROJECT_NAME) 2>/dev/null | grep -q $(PROJECT_NAME); then \
+		kubectl delete statefulset -l app=$(PROJECT_NAME) -n $(NAMESPACE) --wait=false >/dev/null 2>&1 && \
+		echo "  ✅ Deleted StatefulSet(s) with label app=$(PROJECT_NAME)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  StatefulSet with label app=$(PROJECT_NAME) not found" || true; \
+	fi
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Deleting network resources..." || true
+	@if kubectl get svc $(PROJECT_NAME)-svc -n $(NAMESPACE) 2>/dev/null | grep -q $(PROJECT_NAME)-svc; then \
+		kubectl delete svc $(PROJECT_NAME)-svc -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted service $(PROJECT_NAME)-svc" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  Service $(PROJECT_NAME)-svc not found" || true; \
+	fi
+	@if kubectl get svc -n $(NAMESPACE) -l app=$(PROJECT_NAME) 2>/dev/null | grep -q $(PROJECT_NAME); then \
+		kubectl delete svc -l app=$(PROJECT_NAME) -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted additional service(s) with label app=$(PROJECT_NAME)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  Additional services with label app=$(PROJECT_NAME) not found" || true; \
+	fi
+	@if kubectl get ingress $(PROJECT_NAME)-ingress -n $(NAMESPACE) 2>/dev/null | grep -q $(PROJECT_NAME)-ingress; then \
+		kubectl delete ingress $(PROJECT_NAME)-ingress -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted ingress $(PROJECT_NAME)-ingress" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  Ingress $(PROJECT_NAME)-ingress not found" || true; \
+	fi
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Deleting storage resources..." || true
+	@kubectl get pvc -n $(NAMESPACE) -o name 2>/dev/null | \
+		xargs -r -I {} kubectl patch {} -n $(NAMESPACE) \
+		-p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true
+	@if kubectl get pvc shared-storage-claim -n $(NAMESPACE) 2>/dev/null | grep -q shared-storage-claim; then \
+		kubectl delete pvc shared-storage-claim -n $(NAMESPACE) --force --grace-period=0 >/dev/null 2>&1 && \
+		echo "  ✅ Deleted PVC shared-storage-claim" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  PVC shared-storage-claim not found" || true; \
+	fi
+	@if kubectl get pvc -n $(NAMESPACE) -l app=$(PROJECT_NAME) 2>/dev/null | grep -q $(PROJECT_NAME); then \
+		kubectl delete pvc -l app=$(PROJECT_NAME) -n $(NAMESPACE) --force --grace-period=0 >/dev/null 2>&1 && \
+		echo "  ✅ Deleted PVC(s) with label app=$(PROJECT_NAME)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  PVCs with label app=$(PROJECT_NAME) not found" || true; \
+	fi
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Deleting configuration resources..." || true
+	@if kubectl get configmap -n $(NAMESPACE) -l app=$(PROJECT_NAME) 2>/dev/null | grep -q $(PROJECT_NAME); then \
+		kubectl delete configmap -l app=$(PROJECT_NAME) -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted ConfigMap(s) with label app=$(PROJECT_NAME)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  ConfigMaps with label app=$(PROJECT_NAME) not found" || true; \
+	fi
+	@if kubectl get secret -n $(NAMESPACE) -l app=$(PROJECT_NAME) 2>/dev/null | grep -q $(PROJECT_NAME); then \
+		kubectl delete secret -l app=$(PROJECT_NAME) -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted Secret(s) with label app=$(PROJECT_NAME)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  Secrets with label app=$(PROJECT_NAME) not found" || true; \
+	fi
+
+	@if kubectl get configmap postgres-config -n $(NAMESPACE) 2>/dev/null | grep -q postgres-config; then \
+		kubectl delete configmap postgres-config -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted ConfigMap postgres-config" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  ConfigMap postgres-config not found" || true; \
+	fi
+	@if kubectl get secret postgres-secret -n $(NAMESPACE) 2>/dev/null | grep -q postgres-secret; then \
+		kubectl delete secret postgres-secret -n $(NAMESPACE) >/dev/null 2>&1 && \
+		echo "  ✅ Deleted Secret postgres-secret" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  Secret postgres-secret not found" || true; \
+	fi
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Force deleting stuck pods..." || true
+	@if kubectl get pods -n $(NAMESPACE) -l app=$(PROJECT_NAME) 2>/dev/null | grep -q $(PROJECT_NAME); then \
+		kubectl delete pods -n $(NAMESPACE) -l app=$(PROJECT_NAME) --force --grace-period=0 >/dev/null 2>&1 && \
+		echo "  ✅ Force deleted stuck pod(s)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  No stuck pods found" || true; \
+	fi
+	
 	@[ "$(DEBUG)" = "1" ] && echo "🗑️ Removing Docker images..." || true
 	@if [ "$(PROJECT_NAME)" = "log-output" ]; then \
-		docker rmi log-output-app-generator:latest log-output-app-status:latest \
-			$(REDIRECT_OUTPUT) 2>/dev/null || true; \
+		docker rmi log-output-app-generator:latest log-output-app-status:latest >/dev/null 2>&1 && \
+		echo "  ✅ Removed Docker images for log-output" || \
+		([ "$(DEBUG)" = "1" ] && echo "  ⚠️  Docker images not found" || true); \
 	elif [ "$(PROJECT_NAME)" = "project" ]; then \
-		docker rmi project-app-main:latest project-app-backend:latest \
-			$(REDIRECT_OUTPUT) 2>/dev/null || true; \
+		docker rmi project-app-main:latest project-app-backend:latest >/dev/null 2>&1 && \
+		echo "  ✅ Removed Docker images for project" || \
+		([ "$(DEBUG)" = "1" ] && echo "  ⚠️  Docker images not found" || true); \
+	elif [ "$(PROJECT_NAME)" = "ping-pong" ]; then \
+		docker rmi ping-pong-app:latest >/dev/null 2>&1 && \
+		echo "  ✅ Removed Docker image ping-pong-app:latest" || \
+		([ "$(DEBUG)" = "1" ] && echo "  ⚠️  Docker image not found" || true); \
 	else \
-		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) $(REDIRECT_OUTPUT) 2>/dev/null || true; \
+		docker rmi $(IMAGE_NAME):$(IMAGE_TAG) >/dev/null 2>&1 && \
+		echo "  ✅ Removed Docker image $(IMAGE_NAME):$(IMAGE_TAG)" || \
+		([ "$(DEBUG)" = "1" ] && echo "  ⚠️  Docker image not found" || true); \
 	fi
+	
 	@echo "✅ Cleanup complete for project '$(PROJECT_NAME)'!"
 
 # Remove PersistentVolume and associated resources
 delete-pv:
-	@echo "🗑️  Deleting PersistentVolumes..."
-	@if [ ! -f "persistentvolume.yaml" ]; then \
-		echo "⚠️  persistentvolume.yaml not found, skipping"; \
-		exit 0; \
+	@echo "🗑️  Deleting PersistentVolumes and associated resources..."
+	
+	@if [ -f "persistentvolume.yaml" ]; then \
+		if kubectl get -f persistentvolume.yaml 2>/dev/null | grep -q .; then \
+			kubectl delete -f persistentvolume.yaml --grace-period=0 --force --timeout=10s >/dev/null 2>&1 && \
+			echo "  ✅ Deleted PV from persistentvolume.yaml" || true; \
+		else \
+			[ "$(DEBUG)" = "1" ] && echo "  ⚠️  No PV found from persistentvolume.yaml" || true; \
+		fi; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  persistentvolume.yaml not found, skipping file-based cleanup" || true; \
 	fi
-	@echo "🗑️  Removing finalizers and deleting PVs..."
-	@kubectl get pv -o name 2>/dev/null | grep shared-app-pv | \
-		xargs -r kubectl patch -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
-	@kubectl delete -f persistentvolume.yaml --grace-period=0 --force --timeout=10s 2>/dev/null || true
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️  Removing PVC finalizers..." || true
+	@if kubectl get pvc -n $(NAMESPACE) 2>/dev/null | grep -q .; then \
+		kubectl get pvc -n $(NAMESPACE) -o name 2>/dev/null | \
+			xargs -r kubectl patch -n $(NAMESPACE) -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true; \
+		kubectl delete pvc --all -n $(NAMESPACE) --force --grace-period=0 >/dev/null 2>&1 && \
+		echo "  ✅ Deleted all PVCs in namespace $(NAMESPACE)" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  No PVCs found in namespace $(NAMESPACE)" || true; \
+	fi
+	
+	@[ "$(DEBUG)" = "1" ] && echo "🗑️  Removing PV finalizers..." || true
+	@if kubectl get pv 2>/dev/null | grep -q shared-app-pv; then \
+		kubectl get pv -o name 2>/dev/null | grep shared-app-pv | \
+			xargs -r kubectl patch -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true; \
+		kubectl get pv -o name 2>/dev/null | grep shared-app-pv | \
+			xargs -r kubectl delete --force --grace-period=0 >/dev/null 2>&1 && \
+		echo "  ✅ Deleted PVs matching 'shared-app-pv'" || true; \
+	else \
+		[ "$(DEBUG)" = "1" ] && echo "  ⚠️  No PVs found matching 'shared-app-pv'" || true; \
+	fi
+	
 	@echo "✅ PersistentVolume cleanup completed"
 
 # Clean all projects and shared resources (cluster, PVs)
