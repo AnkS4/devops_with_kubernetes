@@ -71,3 +71,4 @@ make rebuild PROJECT_NAME=<project_name>
 - [2.5.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.5)
 - [2.6.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.6)
 - [2.7.](https://github.com/AnkS4/devops_with_kubernetes/tree/2.7)
+   Test using: `$ make build-clean PROJECT_NAME=ping-pong`
